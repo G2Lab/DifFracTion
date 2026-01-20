@@ -6,8 +6,12 @@ DifFraction can be installed in the following ways
      cd DifFracTion
      pip install .
 
-or as a conda package
 
+Data used in this study corresponds to cell line GM12878 and was retrieved from GSE63525 accession number:
+     mkdir test_data/
+     cd test_data/
+     wget [https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE63525&format=file&file=GSE63525%5FGM12878%5Fcombined%5Finterchromosomal%5Fcontact%5Fmatrices%2Etar%2Egz](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63525/suppl/GSE63525%5FGM12878%5Fcombined%5Finterchromosomal%5Fcontact%5Fmatrices.tar.gz)
+     
 
 The DiFfracTion_Tutorial notebook offers a walkthough to the main DifFracTion functions:
      
