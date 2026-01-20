@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: diffraction
+Version: 0.1.0
+Summary: DifFracTion: Systematic normalization and differential interaction identification for cross-sample Hi-C datasets
+Author: J. Carlos Angel
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: scipy
+Requires-Dist: cooler
+Requires-Dist: hic-straw
+Requires-Dist: statsmodels
+Provides-Extra: plot
+Requires-Dist: matplotlib; extra == "plot"

@@ -1,0 +1,15 @@
+#/gpfs/commons/home/cangel/g2lab/projects/06_26_24_HaplotypesHiC/HiC-Dip/rust/hicdip-rs
+# Cargo.toml contains all dependencies and name of the pacjkage
+## To build the package in debug mode, run:
+cargo build 
+## Example to run
+./target/debug/HiC-Dip \
+     --m-1 "/gpfs/commons/home/cangel/g2lab/projects/06_26_24_HaplotypesHiC/HiC-Dip/validation/spike_ins/results/22_0.01_50000_1.0_2_alpha_based/chr22_M1.mcool" \
+	--m-2 "/gpfs/commons/home/cangel/g2lab/projects/06_26_24_HaplotypesHiC/HiC-Dip/validation/spike_ins/results/22_0.01_50000_1.0_2_alpha_based/chr22_M2.mcool" \
+	--reference "/gpfs/commons/home/cangel/g2lab/projects/06_26_24_HaplotypesHiC/HiC-Dip/validation/spike_ins/results/22_0.01_50000_1.0_2_alpha_based/chr22_Ref.mcool" \
+     --output-dir "/gpfs/commons/home/cangel/g2lab/projects/06_26_24_HaplotypesHiC/HiC-Dip/validation/spike_ins/results/22_0.01_50000_1.0_2_alpha_based/" \
+     --chr-sizes /gpfs/commons/home/cangel/g2lab/projects/06_26_24_HaplotypesHiC/Genomes/hg19/hg19.chrom.sizes --bin-size 50000 --chr-x 22 --chr-y 22 --skip-diags 1 --n-permutations 2
+
+
+## To build the package in release mode, run:
+cargo build --release

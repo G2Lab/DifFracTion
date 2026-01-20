@@ -1,0 +1,96 @@
+// From cargo.toml
+
+:dep hdf5 = "0.8.1"
+:dep polars = { version = "0.39", features = ["lazy", "ndarray", "dtype-struct", "csv"] }
+:dep rand = "0.8"
+:dep ndarray = "0.15"
+
+use std::cmp::min;
+use hdf5::{file, types, Error, File, Group, Result,Dataset};
+use std::collections::HashMap;
+use polars::prelude::*;
+use polars::io::csv::CsvWriter;
+use hdf5::types::{VarLenArray, FixedAscii, TypeDescriptor};
+use ndarray::Array2;
+use rand::seq::index::sample;
+use rand::thread_rng;
+use std::fs::File as STDFILE;
+use std::path::{Path, PathBuf};
+
+let hap1 = read_cool(&String::from("/gpfs/commons/home/cangel/g2lab/projects/06_26_24_HaplotypesHiC/data_runs/08_23_25_GRCm39vsPWKPhJ_Baseline_Reference/Haplotype_HiC_matrices//09_hic2cool//PWK_PhJ_Hybrid_week0_S3_assigned_paired.merged_mq0.mcool"))?;
+let hap2 = read_cool(&String::from("/gpfs/commons/home/cangel/g2lab/projects/06_26_24_HaplotypesHiC/data_runs/08_23_25_GRCm39vsPWKPhJ_Baseline_Reference/Haplotype_HiC_matrices//09_hic2cool//B6_Hybrid_week0_S3_assigned_paired.merged_mq0.mcool"))?;
+let n_permutations = 2;
+let bin_size: u32 = 50000;
+let chr_x: String = String::from("chr10");
+let chr_y: String = String::from("chr10");
+
+
+let hap1_group = get_bins_group(&hap1,&bin_size)?;
+let hap2_group = get_bins_group(&hap2,&bin_size)?;
+let contacts_hap1 = get_hic_df_kr(&hap1, &bin_size, &hap1_group, &chr_x,  &chr_y)?;
+let contacts_hap2 = get_hic_df_kr(&hap2, &bin_size, &hap2_group, &chr_x,  &chr_y)?;
+
+let matrix_hap1 = get_hic_matrix_kr(&hap1, &bin_size, &hap1_group, &chr_x,  &chr_y)?;
+let matrix_hap2 = get_hic_matrix_kr(&hap2, &bin_size, &hap2_group, &chr_x,  &chr_y)?;
+
+let contacts_reference = (matrix_hap1 + matrix_hap2)/(2 as f32);
+
+// Structure: bin1, bin2, count_hap1, count_hap2 dataframe
+    let mut joined_df = contacts_hap1.join(
+        &contacts_hap2,
+        ["bin1", "bin2"],
+        ["bin1", "bin2"],
+        JoinArgs::new(JoinType::Inner),
+    )
+    .map_err(|e| hdf5::Error::Internal(format!("Polars join error: {}", e)))?.clone();
+
+let count_left = joined_df.column("count")
+               .map_err(|e| hdf5::Error::Internal(format!("Polars column error: {}", e)))?.clone();
+let count_right = joined_df.column("count_right")
+               .map_err(|e| hdf5::Error::Internal(format!("Polars column error: {}", e)))?.clone();
+
+let mut diff_series = count_left.clone() - count_right.clone();
+let diff_series = diff_series.rename("h1_h2").clone();
+
+let differences_df = joined_df
+    .with_column(diff_series)
+    .map_err(|e| hdf5::Error::Internal(format!("Polars column addition error: {}", e)))?.clone();
+    
+let sorted_df = differences_df.sort(["h1_h2"],Default::default());
+let sorted_df = sorted_df.map_err(|e| hdf5::Error::Internal(format!("Polars error: {}", e)))?.clone();
+
+let upper = sorted_df
+           .lazy()
+           .filter(col("bin1").lt(col("bin2")))
+           .collect().map_err(|e| hdf5::Error::Internal(format!("Polars error: {}", e)))?;
+
+let factor_h1= upper
+                        .column("count")
+                        .map_err(|e| hdf5::Error::Internal(format!("Polars error: {}", e)))?
+                        .sum::<f32>()
+                        .map_err(|e| hdf5::Error::Internal(format!("Polars error: {}", e)))?;
+// Sum upper h2
+let factor_h2 = upper
+                    .column("count_right")
+                    .map_err(|e| hdf5::Error::Internal(format!("Polars error: {}", e)))?
+                    .sum::<f32>()
+                    .map_err(|e| hdf5::Error::Internal(format!("Polars error: {}", e)))?;
+
+// Number of reads to downsample to                    
+let factor_h1_u32 = factor_h1.ceil() as usize;
+let factor_h2_u32 = factor_h2.ceil() as usize;
+
+
+let hap1_down = downsampling(&contacts_reference,factor_h1_u32);
+let hap2_down = downsampling(&contacts_reference,factor_h2_u32);
+let hap1_down_df = array2dataframe(&hap1_down)?;
+let hap2_down_df =  array2dataframe(&hap2_down)?;
+        
+let stats_df = hap1_down_df.join(
+            &hap2_down_df,
+            ["bin1", "bin2"],
+            ["bin1", "bin2"],
+            JoinArgs::new(JoinType::Inner),
+        )
+        .map_err(|e| hdf5::Error::Internal(format!("Polars join error: {}", e)))?.clone();
+        

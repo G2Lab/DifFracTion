@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diffraction"
+version = "0.1.0"
+description = "DifFracTion: Systematic normalization and differential interaction identification for cross-sample Hi-C datasets"
+authors = [{ name = "J. Carlos Angel" }]
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "cooler",
+    "hic-straw",
+    "statsmodels"
+]
+
+[tool.setuptools]
+packages = ["diffraction"]
+
+[project.optional-dependencies]
+plot = ["matplotlib"]

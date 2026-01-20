@@ -1,0 +1,9 @@
+numpy
+pandas
+scipy
+cooler
+hic-straw
+statsmodels
+
+[plot]
+matplotlib
