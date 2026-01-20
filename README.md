@@ -17,7 +17,7 @@ The DiFfracTion_Tutorial notebook offers a walkthough to the main DifFracTion fu
 
 ## Normalization
 
-The inputs to alpha_normalization() and iterative_normalization() are two $n \times n $ chromosome-level balanced Hi-C matrices (e.g., KR or any other balancing method), referred to as matrixA and matrixB, along with the length of the corresponding chromosome and the matrix resolution in base pairs.
+The inputs to alpha_normalization() and iterative_normalization() are two $n x n $ chromosome-level balanced Hi-C matrices (e.g., KR or any other balancing method), referred to as matrixA and matrixB, along with the length of the corresponding chromosome and the matrix resolution in base pairs.
      
      matrix_A_norm,matrix_B_norm,_,_ = DifFracTion.alpha_normalization(matrix_A,matrix_B,chromosome_length,resolution)
 
