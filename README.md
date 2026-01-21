@@ -6,8 +6,13 @@ DifFraction can be installed in the following ways
      cd DifFracTion
      pip install .
 
-or as a conda package
 
+Data used in this study corresponds to cell line GM12878 and was retrieved from GSE63525 accession number:
+
+     mkdir test_data/
+     cd test_data/
+     wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63525/suppl/GSE63525_GM12878_insitu_primary%2Breplicate_combined_30.hic
+     mv GSE63525_GM12878_insitu_primary+replicate_combined_30.hic GM12878-HRC.hic
 
 The DiFfracTion_Tutorial notebook offers a walkthough to the main DifFracTion functions:
      
@@ -17,7 +22,7 @@ The DiFfracTion_Tutorial notebook offers a walkthough to the main DifFracTion fu
 
 ## Normalization
 
-The inputs to alpha_normalization() and iterative_normalization() are two $n \times n $ chromosome-level balanced Hi-C matrices (e.g., KR or any other balancing method), referred to as matrixA and matrixB, along with the length of the corresponding chromosome and the matrix resolution in base pairs.
+The inputs to alpha_normalization() and iterative_normalization() are two $n x n $ chromosome-level balanced Hi-C matrices (e.g., KR or any other balancing method), referred to as matrixA and matrixB, along with the length of the corresponding chromosome and the matrix resolution in base pairs.
      
      matrix_A_norm,matrix_B_norm,_,_ = DifFracTion.alpha_normalization(matrix_A,matrix_B,chromosome_length,resolution)
 
