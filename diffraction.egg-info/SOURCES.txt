@@ -1,3 +1,5 @@
+LICENSE
+README.md
 pyproject.toml
 diffraction/__init__.py
 diffraction/benchmarking.py
