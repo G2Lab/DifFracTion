@@ -1,0 +1,16 @@
+name: diffraction
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - statsmodels
+  - cooler
+  - pip
+  - pip:
+    - hic-straw

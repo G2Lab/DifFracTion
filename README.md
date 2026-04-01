@@ -1,9 +1,10 @@
 # DiFracTion Installation
 
-DifFraction can be installed in the following ways
-
      git clone https://github.com/g2lab/DifFracTion.git
      cd DifFracTion
+     # if mamba is available change it
+     conda env create -f environment.yml
+     conda activate diffraction
      pip install .
 
 
