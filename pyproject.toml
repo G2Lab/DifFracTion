@@ -13,7 +13,6 @@ dependencies = [
     "pandas",
     "scipy",
     "cooler",
-    "hic-straw",
     "statsmodels"
 ]
 
