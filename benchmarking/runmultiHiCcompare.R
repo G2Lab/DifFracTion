@@ -1,8 +1,8 @@
-.libPaths("./multiHiCcompare_Rlibs")
 library(multiHiCcompare)
 library(data.table)
 library(dplyr)
 
+start_time <- proc.time()
 sys.argv <- commandArgs(trailingOnly = TRUE)
 sample_A1 <- sys.argv[1] # file1.hic 
 sample_A2 <- sys.argv[2] # file2.hic
@@ -11,6 +11,12 @@ sample_B2 <- sys.argv[4] # file4.hic
 
 pval_threshold <- as.numeric(sys.argv[6]) # 0.05
 spike.in.file <- sys.argv[5] # spike_ins.bed
+
+arguments <-basename(dirname(dirname(sample_A1)))
+arguments_split <- strsplit(arguments, "_")[[1]]
+chr_number <- arguments_split[1]
+resolution <- arguments_split[2]
+spike_k <- arguments_split[3]
 
 
 
@@ -80,3 +86,15 @@ data.table::fwrite(as.data.frame(confusion_matrix_pval),
 data.table::fwrite(as.data.frame(confusion_matrix_FDR),
             paste0(output.dir,'/confusion_matrix_padj_',pval_threshold,'_multiHiCcompare.txt')
             ,sep='\t',row.names=FALSE,quote=FALSE)
+
+elapsed  <- proc.time() - start_time
+mem_mb   <- gc(reset = TRUE)[2, 6]  # max used heap in Mb
+perf_log <- data.frame(
+    tool        = "multiHiCcompare",
+    chr         = chr_number,
+    resolution  = resolution,
+    spike_k     = spike_k,
+    elapsed_sec = elapsed["elapsed"],
+    mem_mb      = mem_mb
+)
+data.table::fwrite(perf_log, paste0(output.dir, "/runtime_multiHiCcompare.txt"), sep = "\t", row.names = FALSE)

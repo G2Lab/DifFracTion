@@ -1,7 +1,3 @@
-#ml R/4.5.2-mba
-# HiC-Dip/benchmarking/run_HiCcompare.R
-
-.libPaths("./HiCcompare_Rlibs")
 library(HiCcompare)
 library(data.table)
 # Generate a table for comparisons
@@ -11,10 +7,17 @@ library(data.table)
 
 
 # Inputs 
+start_time <- proc.time()
 sys.argv <- commandArgs(trailingOnly = TRUE)
 
 table.file <- sys.argv[1] # file1.hic
 pval_threshold <- as.numeric(sys.argv[2]) # 0.05
+
+arguments <- basename(dirname(dirname(table.file)))
+arguments_split <- strsplit(arguments, "_")[[1]]
+chr_number <- arguments_split[1]
+resolution <- arguments_split[2]
+ds_factor  <- arguments_split[3]
 
 # Functions
 return_to_bin_format <- function(significant_df) {
@@ -69,3 +72,15 @@ data.table::fwrite(as.data.frame(FPR_pval),
 data.table::fwrite(as.data.frame(FPR_FDR),
             paste0(output.dir,'/FPR_padj_',pval_threshold,'_HiCcompare.txt')
             ,sep='\t',row.names=FALSE,quote=FALSE)
+
+elapsed  <- proc.time() - start_time
+mem_mb   <- gc(reset = TRUE)[2, 6]  # max used heap in Mb
+perf_log <- data.frame(
+    tool        = "HiCcompare",
+    chr         = chr_number,
+    resolution  = resolution,
+    ds_factor   = ds_factor,
+    elapsed_sec = elapsed["elapsed"],
+    mem_mb      = mem_mb
+)
+data.table::fwrite(perf_log, paste0(output.dir, "/runtime_HiCcompare.txt"), sep = "\t", row.names = FALSE)

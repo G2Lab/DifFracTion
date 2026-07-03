@@ -1,4 +1,3 @@
-.libPaths("./HiCDPlus_Rlibs")
 library(HiCDCPlus)
 library(data.table)
 library(dplyr)
@@ -6,7 +5,7 @@ library(DESeq2)
 
 
 #Only with p_adj because it requires multiple operations
-
+start_time <- proc.time()
 sys.argv <- commandArgs(trailingOnly = TRUE)
 sample_A1 <- sys.argv[1] 
 sample_A2 <- sys.argv[2] 
@@ -15,6 +14,11 @@ sample_B2 <- sys.argv[4]
 
 pval_threshold <- as.numeric(sys.argv[5]) #0.01
 
+arguments <- basename(dirname(dirname(sample_A1)))
+arguments_split <- strsplit(arguments, "_")[[1]]
+chr_number <- arguments_split[1]
+resolution_str <- arguments_split[2]
+ds_factor  <- arguments_split[3]
 
 return_to_bin_format <- function(significant_df,resolution) {
      # Get to bin format
@@ -137,3 +141,15 @@ FPR <- as.data.frame(FPR)
 data.table::fwrite(FPR,
             paste0(output.dir,'/FPR_padj_',pval_threshold,'_HiCDCPlus.txt')
             ,sep='\t',row.names=FALSE,quote=FALSE)
+
+elapsed  <- proc.time() - start_time
+mem_mb   <- gc(reset = TRUE)[2, 6]  # max used heap in Mb
+perf_log <- data.frame(
+    tool        = "HiCDCPlus",
+    chr         = chr_number,
+    resolution  = resolution_str,
+    ds_factor   = ds_factor,
+    elapsed_sec = elapsed["elapsed"],
+    mem_mb      = mem_mb
+)
+data.table::fwrite(perf_log, paste0(output.dir, "/runtime_HiCDCPlus.txt"), sep = "\t", row.names = FALSE)

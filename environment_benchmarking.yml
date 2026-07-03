@@ -1,0 +1,24 @@
+name: diffraction_benchmarking
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  # Python
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - statsmodels
+  - cooler
+  # R and Bioconductor benchmarking tools
+  - r-base
+  - bioconductor-diffhic
+  - bioconductor-hiccompare
+  - bioconductor-multihiccompare
+  - bioconductor-hicdcplus
+  - bioconductor-deseq2
+  - bioconductor-bsgenome.hsapiens.ucsc.hg19
+  - pip:
+    - hic-straw

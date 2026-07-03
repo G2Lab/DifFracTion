@@ -7,10 +7,10 @@ import argparse
 from matplotlib.patches import Circle
 sys.stdout.flush()
 
-import diffraction
-from diffraction import utils as DifFracTion_utils
-from diffraction import spikein as DifFracTion_spikes
-from diffraction import src as DifFracTion
+import diffraction_edits
+from diffraction_edits import utils_v1 as DifFracTion_utils
+from diffraction_edits import spikein as DifFracTion_spikes
+from diffraction_edits import src_v1 as DifFracTion
 
 def parse_args():
      

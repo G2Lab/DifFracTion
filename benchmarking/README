@@ -36,85 +36,27 @@ Stansfield JC, Cresswell KG, Dozmorov MG (2019). “multiHiCcompare: joint norma
 [multiHiCcompare](https://www.bioconductor.org/packages/release/bioc/html/multiHiCcompare.html)
 ```
 
+# Generate environment
 
-# Installying independent libraries 
-
-```
-ml R/4.5.2-mba
-
-#Initialized on 
-cd ./HiC-Dip/benchmarking/
-
-RScript
-dir.create("./diffHiC_Rlibs",recursive=TRUE)
-.libPaths("./diffHiC_Rlibs")
-
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install("diffHic")
-
-
-```
-
-```
-ml R/4.5.2-mba
-
-dir.create("./HiCcompare_Rlibs",recursive=TRUE)
-.libPaths("./HiCcompare_Rlibs")
-
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install("HiCcompare")
-```
-```
-ml R/4.5.2-mba
-
-dir.create("./HiCDPlus_Rlibs",recursive=TRUE)
-.libPaths("./HiCDPlus_Rlibs")
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install("HiCDCPlus")
-
-```
-
-
-```
-#ml R/4.5.2-mba
-dir.create("./multiHiCcompare_Rlibs",recursive=TRUE)
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install("multiHiCcompare")
-```
-
-```
-#ml R/4.5.2-mba
-dir.create("./HiCDPlus_Rlibs",recursive=TRUE)
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install("HiCDCPlus")
-```
+mamba env create -f ../environment_benchmarking.yml
 
 # Benchmarking execution - Spikes
 ```
+# inside benchmarking
 
-
-hic_path="../test_data/GM12878-HRC.hic"
-chromosomes=(20 21 22)
-resolutions=(50000)
+hic_path=$(realpath "../test_data/GM12878-HRC.hic")
+chromosomes=$(seq 1 22)
+resolutions=(10000 50000 100000 250000 500000)
 pval=(0.01)
 k_spikes=(2 3 4)
+
 
 for resolution in ${resolutions[@]}; do
     for chromosome in ${chromosomes[@]};do
         for p_val in ${pval[@]}; do
             for k in ${k_spikes[@]}; do
                 sbatch --job-name=Benchmarking_DifFraction_spikes_chr${chromosome}_res${resolution} \
-                    run_benchmarking.sh \
+                    run_benchmarking_spikes.sh \
                     -f ${hic_path} -c ${chromosome} -r ${resolution} -k ${k} -p ${p_val}
             done
         done
@@ -127,19 +69,49 @@ done
 ```
 
 
-hic_path="../test_data/GM12878-HRC.hic"
-chromosomes=(20 21 22)
-resolutions=(100000)
+hic_path=$(realpath "../test_data/GM12878-HRC.hic")
+chromosomes=$(seq 1 22)
+resolutions=(10000 50000 100000 250000)
 pval=(0.01)
+
 ds=(0.1 0.25 0.5 0.75 1.0)
 
 for resolution in ${resolutions[@]}; do
     for chromosome in ${chromosomes[@]};do
         for p_val in ${pval[@]}; do
             for d in ${ds[@]}; do
-                sbatch --job-name=Benchmarking_DifFracTion_chr${chromosome}_res${resolution} \
+                sbatch --job-name=ds_Benchmarking_DifFracTion_chr${chromosome}_res${resolution}_ds${d} \
                     run_benchmarking_downsample.sh \
                     -f ${hic_path} -c ${chromosome} -r ${resolution} -d ${d} -p ${p_val}
+            done
+        done
+    done
+done
+
+```
+
+# Benchmarking execution - Downsample and spikes
+```
+
+
+hic_path=$(realpath "../test_data/GM12878-HRC.hic")
+chromosomes=$(seq 1 22)
+resolutions=(50000 10000)
+
+pval=(0.01)
+
+ds=(0.1 0.25 0.5 0.75 1.0)
+k_spikes=(2 3 4)
+
+for resolution in ${resolutions[@]}; do
+    for chromosome in ${chromosomes[@]};do
+        for p_val in ${pval[@]}; do
+            for d in ${ds[@]}; do
+                for k in ${k_spikes[@]}; do
+                    sbatch --job-name=ds_Benchmarking_DifFracTion_chr${chromosome}_res${resolution}_ds${d}_k${k} \
+                        run_benchmarking_downsample_n_spikes.sh \
+                        -f ${hic_path} -c ${chromosome} -r ${resolution} -d ${d} -p ${p_val} -k ${k}
+                done
             done
         done
     done

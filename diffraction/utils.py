@@ -439,6 +439,8 @@ def correction(ref_counts, counts_to_scale, i,
 	do_weights = True
  
 	# Decays. Metric has to be consistent with the one used on previous steps
+	
+	# This step simply extracts the <metric> decay per distance
 	decay_ref = extract_metric_decay(ref_counts, metric=metric)
 	decay_2   = extract_metric_decay(counts_to_scale, metric=metric)
 

@@ -3,3 +3,14 @@
 *.mcool
 *.cool
 *.hic.1
+
+*ipynb
+
+# results folders
+test_data/*
+generated_data/*
+results_downsample/*
+results_spikeins/*
+results_downsample_n_spikes/*
+benchmarking/PBS/*
+analyses/*

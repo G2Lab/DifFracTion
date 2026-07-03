@@ -1,13 +1,12 @@
-#ml R/4.5.2-mba
-# HiC-Dip/benchmarking/run_diffHic.R
-
-.libPaths("./diffHiC_Rlibs")
 library(diffHic)
 library(edgeR)
 library(InteractionSet)
 library(GenomicRanges)
 library(data.table)
 library(dplyr)
+
+start_time <- proc.time()
+
 # Inputs
 sys.argv <- commandArgs(trailingOnly = TRUE)
 table.file <- sys.argv[1] # file1.hic
@@ -88,7 +87,7 @@ coords <- as.data.frame(as(interactions(iset), "StrictGInteractions"))
 res_table <- cbind(coords, res_table)
 
 significant_results <- res_table[res_table$PValue <= pval_threshold, ]
-significant_results_FDR <- significant_results[significant_results$FDR <= pval_threshold, ]
+significant_results_FDR <- res_table[res_table$FDR <= pval_threshold, ]
 
 significant_results_bins <- return_to_bin_format(significant_results)
 significant_results_FDR_bins <- return_to_bin_format(significant_results_FDR)
@@ -121,7 +120,7 @@ get_confusion_matrix <- function(significant_coords, spike_ins_coords, iset) {
      #What the tool found but is not a spike in
      FP <- anti_join(significant_coords_dt, spike_ins_coords, by=c("start1","end1"))
      TN = n_tests -  nrow(TP) - nrow(FP) - nrow(FN)
-     confusion_matrix <- list("TP"=nrow(TP), "FP"=nrow(FP), "TN"=TN, "FN"=nrow(FN))
+     confusion_matrix <- list("TP"=nrow(TP), "FP"=nrow(FP), "TN"=TN, "FN"=nrow(FN), "n_tests"=n_tests)
      return(confusion_matrix)
 }
 
@@ -130,6 +129,7 @@ confusion_matrix_pval <- get_confusion_matrix(significant_coords, spike_ins_coor
 confusion_matrix_FDR <- get_confusion_matrix(significant_coords_FDR, spike_ins_coords, iset)
 # Save confusion matrices
 output.dir <- paste0(dirname(dirname(table.file)),"/performance/")
+
 dir.create(output.dir,recursive=TRUE, showWarnings=FALSE)
 data.table::fwrite(as.data.frame(confusion_matrix_pval),
             paste0(output.dir,'/confusion_matrix_pval_',pval_threshold,'_diffHiC.txt')
@@ -137,3 +137,21 @@ data.table::fwrite(as.data.frame(confusion_matrix_pval),
 data.table::fwrite(as.data.frame(confusion_matrix_FDR),
             paste0(output.dir,'/confusion_matrix_padj_',pval_threshold,'_diffHiC.txt')
             ,sep='\t',row.names=FALSE,quote=FALSE)
+
+arguments <-basename(dirname(dirname(table.file)))
+arguments_split <- strsplit(arguments, "_")[[1]]
+chr_number <- arguments_split[1]
+resolution <- arguments_split[2]
+spike_k <- arguments_split[3]
+
+elapsed  <- proc.time() - start_time
+mem_mb   <- gc(reset = TRUE)[2, 6]  # max used heap in Mb
+perf_log <- data.frame(
+    tool        = "diffHiC",
+    chr         = chr_number,
+    resolution  = resolution,
+    spike_k     = spike_k,
+    elapsed_sec = elapsed["elapsed"],
+    mem_mb      = mem_mb
+)
+data.table::fwrite(perf_log, paste0(output.dir, "/runtime_diffHiC.txt"), sep = "\t", row.names = FALSE)
