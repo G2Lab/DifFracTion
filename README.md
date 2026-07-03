@@ -12,8 +12,18 @@ Data used in this study corresponds to cell line GM12878 and was retrieved from 
 
      mkdir test_data/
      cd test_data/
+
+     Read counts 1,844,107,778
      wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63525/suppl/GSE63525_GM12878_insitu_primary%2Breplicate_combined_30.hic
      mv GSE63525_GM12878_insitu_primary+replicate_combined_30.hic GM12878-HRC.hic
+
+     Read counts 735,043,093
+     wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63525/suppl/GSE63525_IMR90_combined_30.hic 
+     mv GSE63525_IMR90_combined_30.hic IMR90-HRC.hic
+     
+     Read counts 641,402,880
+     wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63525/suppl/GSE63525_K562_combined_30.hic
+     mv GSE63525_K562_combined_30.hic K562-HRC.hic
 
 The DiFfracTion_Tutorial notebook offers a walkthough to the main DifFracTion functions:
      

@@ -1,5 +1,5 @@
 import hicstraw
-import diffraction
+import diffraction_edits
 import sys,os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
@@ -9,9 +9,9 @@ import pandas as pd
 import argparse
 
 
-from diffraction import utils as DifFracTion_utils
-from diffraction import spikein as DifFracTion_spikes
-from diffraction import src as DifFracTion
+from diffraction_edits import utils_v1 as DifFracTion_utils
+from diffraction_edits import spikein as DifFracTion_spikes
+from diffraction_edits import src_v1 as DifFracTion
 
 def parse_args():
 

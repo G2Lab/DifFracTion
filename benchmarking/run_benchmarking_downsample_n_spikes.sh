@@ -2,11 +2,10 @@
 #SBATCH --time=40:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=30G
-#SBATCH --output=./PBS/ds_benchmarking_%x.out
-#SBATCH --error=./PBS/ds_benchmarking_%x.err
+#SBATCH --output=./PBS/ds_n_spikes_benchmarking_%x.out
+#SBATCH --error=./PBS/ds_n_spikes_benchmarking_%x.err
 
 ## This script runs the benchmarking of DifFracTion against other tools (diffHiC, HiCcompare, HiCDCPlus, multiHiCcompare) using the generated input files. It evaluates the performance of each tool based on the generated spike-ins and their neighbors.
-## It differs from run becnhmarking because here we are focusing on the performance (FP) of tools when the data is downsampled not when we introduce spike ins.
 
 #mamba env create -f ../environment_benchmarking.yml
 
@@ -57,7 +56,9 @@ usage() {
     echo "  -c,  --chrom       Chromosome to process (e.g., 1)"
     echo "  -r,  --resolution  Resolution (bin size) in bp"
     echo "  -p,  --pval        P-value threshold for significance."
+    echo ''
     echo "  -d,  --downsample_factor  Downsample factor. Default: 1.0"
+    echo "  -k,  --k_spikes        Number of spike ins to introduce. Default: 0"
 
     echo ""
     exit 1
@@ -70,6 +71,7 @@ while [[ "$#" -gt 0 ]]; do
         -r|--resolution) resolution="$2"; shift 2 ;;
         -p|--pval) p_val_threshold="$2"; shift 2 ;;
         -d|--downsample_factor) downsample_factor="$2"; shift 2 ;;
+        -k|--k_spikes) k_spikes="$2"; shift 2 ;;
 
         *) echo "[DifFracTion] [ERROR] Unknown parameter: $1"; usage ;;
     esac
@@ -91,7 +93,7 @@ echo "  Resolution: $resolution"
 echo "  Downsample factor: $downsample_factor"
 echo "  P-value threshold: $p_val_threshold"
 echo "  Input files generation for tools will be stored in:"
-echo "  Directory: ../results_downsample/{tool_name}/${chrom}_${resolution}_${downsample_factor}/input_files/"
+echo "  Directory: ../results_downsample_n_spikes/{tool_name}/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/"
 
 echo "[DifFracTion] [INFO] Running benchmarking..."
 echo "----------------------------------------"
@@ -99,7 +101,7 @@ echo "[DifFracTion] [INFO] Generating input files for benchmarking..."
 echo "----------------------------------------"
 
 cd ..
-python -m benchmarking.generate_inputs_downsample --hic $hic --chrom $chrom --resolution $resolution --downsample_factor $downsample_factor
+python -m benchmarking.generate_inputs_downsample_n_spikes --hic $hic --chrom $chrom --resolution $resolution --downsample_factor $downsample_factor --k_spikes $k_spikes
 cd benchmarking
 
 echo "[DifFracTion] [INFO] Input files generation completed."
@@ -113,19 +115,20 @@ if $run_all_tools; then
 
      # --- DifFracTion ---
      echo "[DifFracTion] [INFO] Evaluating DifFracTion..."
-     echo "[DifFracTion] [INFO] ../results_downsample/DifFracTion/${chrom}_${resolution}_${downsample_factor}/input_files/ "
+     echo "[DifFracTion] [INFO] ../results_downsample_n_spikes/DifFracTion/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/ "
      echo "----------------------------------------"
-     diffraction_dir=$(realpath "../results_downsample/DifFracTion/${chrom}_${resolution}_${downsample_factor}/input_files/")
-     matrix_A=$(find ${diffraction_dir} -name "*downsampled*.npz" | head -1)
-     matrix_B=$(find ${diffraction_dir} -name "*kb.npz" | head -1)
+     diffraction_dir=$(realpath "../results_downsample_n_spikes/DifFracTion/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/")
+     matrix_B=$(find ${diffraction_dir} -name "*downsampled*.npz" | head -1)
+     matrix_A=$(find ${diffraction_dir} -name "*kb.npz" | head -1)
      echo "[DifFracTion] [INFO] DifFracTion inputs:"
-     echo "  matrixA (downsampled): ${matrix_A}"
-     echo "  matrixB (original):    ${matrix_B}"
-     echo "  chrom: ${chrom}  resolution: ${resolution}  pval: ${p_val_threshold}"
+     echo "  matrixB (downsampled): ${matrix_B}"
+     echo "  matrixA (original + spike-ins):    ${matrix_A}"
+     echo "  downsample_factor: ${downsample_factor} k_spikes: ${k_spikes}"
+     echo "  chrom: ${chrom}  resolution: ${resolution}  pval: ${p_val_threshold} "
      echo "  output_dir: $(dirname ${diffraction_dir})/performance/"
      echo "  [norm: alpha]"
      echo "  [norm: iterative]"
-     sbatch run_DifFracTion_ds.sh --matrixA ${matrix_A}  \
+     sbatch run_DifFracTion.sh --matrixA ${matrix_A}  \
                               --matrixB ${matrix_B} \
                               --chrom $chrom \
                               --resolution $resolution \
@@ -133,7 +136,7 @@ if $run_all_tools; then
                               --type_norm alpha \
                               --adjusted_pvalues_method distance \
                               --output_dir $(dirname ${diffraction_dir})/performance/
-     sbatch run_DifFracTion_ds.sh --matrixA ${matrix_A}  \
+     sbatch run_DifFracTion.sh --matrixA ${matrix_A}  \
                               --matrixB ${matrix_B} \
                               --chrom $chrom \
                               --resolution $resolution \
@@ -145,59 +148,53 @@ if $run_all_tools; then
 
      # --- diffHiC ---
      echo "[DifFracTion] [INFO] Evaluating diffHiC..."
-     echo "[DifFracTion] [INFO] ../results_downsample/diffHiC/${chrom}_${resolution}_${downsample_factor}/input_files/ "
+     echo "[DifFracTion] [INFO] ../results_downsample_n_spikes/diffHiC/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/ "
      echo "----------------------------------------"
-     diffHiC_dir=$(realpath "../results_downsample/diffHic/${chrom}_${resolution}_${downsample_factor}/input_files/")
+     diffHiC_dir=$(realpath "../results_downsample_n_spikes/diffHic/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/")
      echo "[DifFracTion] [INFO] diffHiC inputs:"
-     echo "  table: ${diffHiC_dir}/diffHic_input_chr${chrom}_res${resolution}_ds${downsample_factor}.table"
+     echo "  table: ${diffHiC_dir}/diffHic_input_chr${chrom}_res${resolution}_ds${downsample_factor}_k${k_spikes}.table"
      echo "  pval:  ${p_val_threshold}"
-     Rscript run_diffHiC_ds.R ${diffHiC_dir}/diffHic_input_chr${chrom}_res${resolution}_ds${downsample_factor}.table ${p_val_threshold}
+
+     sbatch run_diffHiC.sh ${diffHiC_dir} ${chrom} ${resolution} ${k_spikes} ${p_val_threshold}
      echo "----------------------------------------"
 
      # --- HiCcompare ---
      echo "[DifFracTion] [INFO] Evaluating HiCcompare."
-     echo "[DifFracTion] [INFO] ../results_downsample/HiCcompare/${chrom}_${resolution}_${downsample_factor}/input_files/ "
+     echo "[DifFracTion] [INFO] ../results_downsample_n_spikes/HiCcompare/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/ "
      echo "----------------------------------------"
-     HiCcompare_dir=$(realpath "../results_downsample/HiCcompare/${chrom}_${resolution}_${downsample_factor}/input_files/")
+     HiCcompare_dir=$(realpath "../results_downsample_n_spikes/HiCcompare/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/")
      echo "[DifFracTion] [INFO] HiCcompare inputs:"
-     echo "  table: ${HiCcompare_dir}/HiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}.table"
+     echo "  table: ${HiCcompare_dir}/HiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_k${k_spikes}.table"
      echo "  pval:  ${p_val_threshold}"
-     Rscript run_HiCcompare_ds.R ${HiCcompare_dir}/HiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}.table ${p_val_threshold}
+     sbatch run_HiCcompare.sh ${HiCcompare_dir} ${chrom} ${resolution} ${k_spikes} ${p_val_threshold}
      echo "----------------------------------------"
 
      # --- HiCDCPlus ---
      echo "[DifFracTion] [INFO] Evaluating HiCDCPlus."
-     echo "[DifFracTion] [INFO] ../results_downsample/HiCDCPlus/${chrom}_${resolution}_${downsample_factor}/input_files/ "
+     echo "[DifFracTion] [INFO] ../results_downsample_n_spikes/HiCDCPlus/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/ "
      echo "----------------------------------------"
-     HiCDCPlus_dir=$(realpath "../results_downsample/HiCDCPlus/${chrom}_${resolution}_${downsample_factor}/input_files/")
+     HiCDCPlus_dir=$(realpath "../results_downsample_n_spikes/HiCDCPlus/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/")
      echo "[DifFracTion] [INFO] HiCDCPlus inputs:"
-     echo "  A1: ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_ds${downsample_factor}_A1.table"
-     echo "  A2: ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_ds${downsample_factor}_A2.table"
-     echo "  B1: ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_ds${downsample_factor}_B1.table"
-     echo "  B2: ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_ds${downsample_factor}_B2.table"
+     echo "  A1: ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_k${k_spikes}_A1.table"
+     echo "  A2: ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_k${k_spikes}_A2.table"
+     echo "  B1: ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_k${k_spikes}_B1.table"
+     echo "  B2: ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_k${k_spikes}_B2.table"
      echo "  pval: ${p_val_threshold}"
-     Rscript run_HiCDCPlus_ds.R ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_ds${downsample_factor}_A1.table \
-      ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_ds${downsample_factor}_A2.table \
-      ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_ds${downsample_factor}_B1.table \
-      ${HiCDCPlus_dir}/HiCDCPlus_input_chr${chrom}_res${resolution}_ds${downsample_factor}_B2.table \
-      ${p_val_threshold}
+     sbatch run_HiCDCplus.sh ${HiCDCPlus_dir} ${chrom} ${resolution} ${k_spikes} ${p_val_threshold}
      echo "----------------------------------------"
 
      # --- multiHiCcompare ---
      echo "[DifFracTion] [INFO] Evaluating multiHiCcompare."
-     echo "[DifFracTion] [INFO] ../results_downsample/multiHiCcompare/${chrom}_${resolution}_${downsample_factor}/input_files/ "
+     echo "[DifFracTion] [INFO] ../results_downsample_n_spikes/multiHiCcompare/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/ "
      echo "----------------------------------------"
-     multiHiCcompare_dir=$(realpath "../results_downsample/multiHiCcompare/${chrom}_${resolution}_${downsample_factor}/input_files/")
+     multiHiCcompare_dir=$(realpath "../results_downsample_n_spikes/multiHiCcompare/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/")
      echo "[DifFracTion] [INFO] multiHiCcompare inputs:"
-     echo "  A1: ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_IF_A1.table"
-     echo "  A2: ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_IF_A2.table"
-     echo "  B1: ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_IF_B1.table"
-     echo "  B2: ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_IF_B2.table"
+     echo "  A1: ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_k${k_spikes}_IF_A1.table"
+     echo "  A2: ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_k${k_spikes}_IF_A2.table"
+     echo "  B1: ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_k${k_spikes}_IF_B1.table"
+     echo "  B2: ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_k${k_spikes}_IF_B2.table"
      echo "  pval: ${p_val_threshold}"
-     Rscript runmultiHiCcompare_ds.R ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_IF_A1.table \
-          ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_IF_A2.table \
-          ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_IF_B1.table \
-          ${multiHiCcompare_dir}/multiHiCcompare_input_chr${chrom}_res${resolution}_ds${downsample_factor}_IF_B2.table \
-          ${p_val_threshold}
+     sbatch run_multiHiCcompare.sh ${multiHiCcompare_dir} ${chrom} ${resolution} ${k_spikes} ${p_val_threshold}
+     echo "----------------------------------------"
      echo "----------------------------------------"
 fi

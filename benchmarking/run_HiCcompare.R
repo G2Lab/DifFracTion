@@ -1,7 +1,3 @@
-#ml R/4.5.2-mba
-# HiC-Dip/benchmarking/run_HiCcompare.R
-
-.libPaths("./HiCcompare_Rlibs")
 library(HiCcompare)
 library(data.table)
 # Generate a table for comparisons
@@ -9,13 +5,22 @@ library(data.table)
 # Previously we have saved the table with the spike ins and the neighbors to be identified as significant interactions
 # We need to load this table too and then see if we can identify the spike ins
 
+start_time <- proc.time()
 
 # Inputs 
 sys.argv <- commandArgs(trailingOnly = TRUE)
 
 table.file <- sys.argv[1] # file1.hic
-pval_threshold <- as.numeric(sys.argv[3]) # 0.05
+
+pval_threshold <- as.numeric(sys.argv[3]) # 0.01
 spike.in.file <- sys.argv[2] # spike_ins.bed
+
+
+arguments <-basename(dirname(dirname(table.file)))
+arguments_split <- strsplit(arguments, "_")[[1]]
+chr_number <- arguments_split[1]
+resolution <- arguments_split[2]
+spike_k <- arguments_split[3]
 
 # Functions
 return_to_bin_format <- function(significant_df) {
@@ -79,3 +84,15 @@ data.table::fwrite(as.data.frame(confusion_matrix_pval),
 data.table::fwrite(as.data.frame(confusion_matrix_FDR),
             paste0(output.dir,'/confusion_matrix_padj_',pval_threshold,'_HiCcompare.txt')
             ,sep='\t',row.names=FALSE,quote=FALSE)
+
+elapsed  <- proc.time() - start_time
+mem_mb   <- gc(reset = TRUE)[2, 6]  # max used heap in Mb
+perf_log <- data.frame(
+    tool        = "HiCcompare",
+    chr         = chr_number,
+    resolution  = resolution,
+    spike_k     = spike_k,
+    elapsed_sec = elapsed["elapsed"],
+    mem_mb      = mem_mb
+)
+data.table::fwrite(perf_log, paste0(output.dir, "/runtime_HiCcompare.txt"), sep = "\t", row.names = FALSE)

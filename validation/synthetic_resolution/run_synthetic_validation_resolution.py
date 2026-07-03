@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import argparse
 
-import diffraction
-from diffraction import utils as DifFracTion_utils
-from diffraction import src as DifFracTion
+import diffraction_edits
+from diffraction_edits import utils_v1 as DifFracTion_utils
+from diffraction_edits import src_v1 as DifFracTion
 
 #from src import src as src
 #from src import utils as DifFracTion
