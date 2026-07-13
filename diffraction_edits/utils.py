@@ -101,11 +101,6 @@ def plot_MA(matrix_A: np.ndarray,
 
 	IF_90th_percentile = np.percentile(all_IF, 90)
 
-	print(f"IF(A/B) Distribution:")
-
-	print(f"IF(A/B) Distribution (Within Range):")
-
-	print(f"IF(A/B) Distribution (Outside Range):")
 	fig = plt.figure(figsize=(8, 6), dpi=200)
 
 	plt.scatter(all_distances, all_log2fc, alpha=0.5, s=1, 
@@ -251,17 +246,34 @@ def matrix_downsampling(matrix, n_reads):
 
 
 # ── Alpha Normalization functions ──────────────────────────────────────────────────────────────
-def _CI_bootstrap(data, n_resamples=1000, confidence_level=0.95):
-	data = data[data > 0]  # Filter out non-positive values
+def _CI_bootstrap(data, n_resamples=100, confidence_level=0.95) -> bootstrap.BootstrapResult:
+	'''Calculate the confidence interval for the median of the data using bootstrap resampling.
+	:param data: 1D array of data points
+	:param n_resamples: number of bootstrap resamples. Default is 500
+	:param confidence_level: confidence level for the interval. Default is 0.95 
+	'''
+	data = data[data > 0]  # Filter out non-positive or zero values
 	R = bootstrap((data,), np.median, confidence_level=confidence_level, n_resamples=n_resamples, method='percentile')
 
 	return R
 
 def _calculate_cutoffs(matrix_A: np.ndarray, matrix_B: np.ndarray, resolution: int,upper_limit: float = 7e6):
+	'''Calculate cutoffs for matrices A and B based on the upper limit. It uses a confidence interval bootstraping technique
+	which allow us to get a robust estimate of the median of the counts outside the distance decay, therefore allowing us
+	to set up a "noise" cutoff.
+	Args:
+	:param matrix_A: dense matrix A
+	:param matrix_B: dense matrix B
+	:param resolution: resolution of the matrices
+	:param upper_limit: upper limit for the distance
+	'''
 	n=matrix_A.shape[0]
+
 	min_d = int(min(n, upper_limit // resolution)) # because we want to get the bins outside the distance decay range
 	max_d = int(max(n, upper_limit // resolution)) # because we want to get the bins outside the distance decay range
 	out_A, out_B = [], []
+	
+	# Get all counts outside the distance decay range (overdispersion)
 	for d in range(min_d, max_d):
 		diag_A = np.asarray(matrix_A.diagonal(d), dtype=np.float32).ravel()
 		diag_B = np.asarray(matrix_B.diagonal(d), dtype=np.float32).ravel()
@@ -269,14 +281,13 @@ def _calculate_cutoffs(matrix_A: np.ndarray, matrix_B: np.ndarray, resolution: i
 		out_B.append(diag_B)
 
 
-	
 	out_A = np.concatenate(out_A)
 	out_B = np.concatenate(out_B)
 
 	# We have each matrix out of distance points, we calculate a CI
 	# Calculate CI
-	R_A = _CI_bootstrap(out_A[out_A > 0], n_resamples=1000, confidence_level=0.95)
-	R_B = _CI_bootstrap(out_B[out_B > 0], n_resamples=1000, confidence_level=0.95)
+	R_A = _CI_bootstrap(out_A[out_A > 0])
+	R_B = _CI_bootstrap(out_B[out_B > 0])
 
 	cutoff_A = R_A.confidence_interval.high if R_A.confidence_interval.high > 0 else 0
 	cutoff_B = R_B.confidence_interval.high if R_B.confidence_interval.high > 0 else 0
@@ -293,9 +304,12 @@ def get_distances_and_counts_paired(matrix_A: np.ndarray, matrix_B: np.ndarray, 
         cutoff_A, cutoff_B = 0, 0
 
     n = matrix_A.shape[0]
+
     min_d = int(max(1, lower_limit // resolution))
     max_d = int(min(n, upper_limit // resolution))
 
+    # Everything inside the range but that also has counts above the cutoff for both matrices
+    # This is just for modeling the distance decay, we havent removed any bins yet
     distances_list, counts_A, counts_B = [], [], []
     for d in range(min_d, max_d):
         diag_A = np.asarray(matrix_A.diagonal(d), dtype=np.float32).ravel()
@@ -648,6 +662,18 @@ def calculate_distance_decay(distances,counts_A_array,counts_B_array,metric='med
 
 def iterative_correction(matrix_A, matrix_B, resolution,metric='median',
 					weight_factor=-1.08, eta=0.15, tolerance=1e-6, filter=True,plot=False):
+	'''Iteratively corrects the distance decay of matrix_B to match that of matrix_A.
+	Args:
+		:param matrix_A: reference matrix (dense)
+		:param matrix_B: matrix to be corrected (dense)
+		:param resolution: bin resolution in base pairs
+		:param metric: metric to use for distance decay ('median' or 'mean')
+		:param weight_factor: factor for weighting the correction. Default is -1.08, which prioritizes short-range interactions.
+		:param eta: learning rate for the correction. Default is 0.15, which controls the step size of the correction.
+		:param tolerance: tolerance for convergence. Default is 1e-6, which determines when to stop iterating based on the improvement in error.
+		:param filter: whether to filter the matrices based on CI cutoffs. Default is True, which removes low-count bins that may introduce noise in the distance decay estimation.
+		:param plot: whether to plot the correction
+	'''
 	best_error  = float("inf")
 	updated_factor = 1.0
 	min_window = 10 # minimum number of distances to check per cycle
@@ -892,6 +918,7 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 
 	
 	if bayesian:
+		#Obs rows and cols are the indices of the bins that have valid counts in both matrices, so we can compute log2fc only for those bins. The distances and log2fc arrays will be filtered to only include those bins.
 		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc_bayesian(norm_matrix_A,norm_matrix_B,resolution,lower_limit, upper_limit)
 		# For permutation test, use raw log2fc so the comparison is not biased by Bayesian shrinkage
 		_, log2_fc_raw, _, log2_fc_raw_out, *_ = compute_log2fc(norm_matrix_A, norm_matrix_B, resolution, upper_limit, lower_limit)
@@ -900,10 +927,15 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 		distances, log2_fc, distances_out, log2_fc_out , obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc(norm_matrix_A, norm_matrix_B, resolution,lower_limit, upper_limit)
 
 	# Get cutoffs
-	IF_cutoff = compute_IF_cutoff(IF_values, IF_values_out, option="out")
-	print("IF cutoff: ", IF_cutoff)
-	IF_matrix = (norm_matrix_A + norm_matrix_B) // 2
-	mask_matrix = (IF_matrix > IF_cutoff)
+	#Must be roughly the same because we have normalized
+	cutA,cutB = _calculate_cutoffs(norm_matrix_A, norm_matrix_B,
+						      resolution, lower_limit, upper_limit)
+
+	IF_cutoff = np.mean([cutA, cutB])
+	print("Cutoff: ", IF_cutoff)
+
+	IF_matrix = (norm_matrix_A + norm_matrix_B) / 2
+	mask_matrix = (IF_matrix >= IF_cutoff)
 
 	# This is to get the amount of reads to sample, we cannot make the cutoff here because we need to model dispersion in the permutation test
 	# These have to use the original counts, because they define the variance of the null distribution (how spread the fc are)
@@ -918,9 +950,11 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 	# Use raw log2fc for permutation test when bayesian=True to keep the comparison symmetric
 	obs_log2fc = raw_log2fc_for_perm if bayesian else observed_log2fc
 
-	# Filter all arrays to bins where average IF exceeds the cutoff
-	if do_IF_cutoff:
+	# Filter all arrays to bins where average cutoff is met, if requested
+	if do_IF_cutoff: 
+		# whether the specific bin passed the cutoff
 		if_mask = mask_matrix[obs_rows, obs_cols]
+		# Keep only those bins
 		obs_rows_f       = obs_rows[if_mask]
 		obs_cols_f       = obs_cols[if_mask]
 		distances      = distances[if_mask]
@@ -933,8 +967,11 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 	obs_A = np.asarray(norm_matrix_A,dtype=np.float32)
 	obs_B = np.asarray(norm_matrix_B,dtype=np.float32)
 	background = obs_A + obs_B
+	# We keep all bins because we need to model the dispersion
 	background = np.asarray(background, dtype=np.float64)
-	background = background[obs_rows, obs_cols]
+	background = background[obs_rows, obs_cols] #
+
+
 	# The trick is here, probabilities are always fixed, because we divided them, so it does not matter the initial number of reads 
 	# Bin_i will always have the same probability of being sampled, and the multinomial will take care of the variance, because it is a random sampling process
 	probs = background / background.sum()
@@ -964,7 +1001,7 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 		# then it should come from sparse counts
 		# therefore it is not confident calling, then it makes sense that the log2fc values from the subsampling will be bigger than the observed one, 
 		# and therefore the pvalue will be close to 1, which is what we expect for low confidence calls
-		log2_fc_perm = np.log2((counts_A + 0.01) / (counts_B + 0.01))
+		log2_fc_perm = np.log2((counts_A ) / (counts_B ))
 
 		exceed_counts += (np.abs(log2_fc_perm) > np.abs(obs_log2fc)).astype(np.int32)
 
@@ -1252,8 +1289,8 @@ def compute_log2fc_bayesian(matrix_A,matrix_B,resolution,lower_limit=5e4, upper_
 		# Compute log2 fold change for valid entries
 		#For each valid entry we have the observed counts in A and B, each element correspond to the respective bin
 		#shape (N,) where N is the number of valid entries in the diagonal
-		diag_A_valid = (diag_A[valid] + 0.00001).astype(np.float32) # add a small pseudocount to avoid log2(0)
-		diag_B_valid = (diag_B[valid] + 0.00001).astype(np.float32) # add a small pseudocount to avoid log2(0)
+		diag_A_valid = (diag_A[valid]).astype(np.float32) # add a small pseudocount to avoid log2(0)
+		diag_B_valid = (diag_B[valid]).astype(np.float32) # add a small pseudocount to avoid log2(0)
 		
 		#Now this is the log2fc
 		post_mean = bayesian_stimation(diag_A_valid, diag_B_valid)
