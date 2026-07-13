@@ -37,7 +37,6 @@ def alpha_normalization(
 	Returns:
 	norm_matrix_A (numpy.ndarray): Alpha-normalized first matrix.
 	norm_matrix_B (numpy.ndarray): Alpha-normalized second matrix.
-	scaling_factor (float): The calculated scaling factor used for normalization.
 	"""
 
 	# These have all the bins within the distance decay limits, the three objects are the same size
@@ -65,8 +64,9 @@ def alpha_normalization(
 	# - [6] the log of the observed metric values (for log-log plots)
 	#A_values,B_values=calculate_distance_decay(distances,counts_A,counts_B,metric='median')
 	# Here it does not matter because all distances were already filtered
-	A_values=DifFracTion_utils.calculate_distance_decay_individual(distances_A, counts_A, metric=metric)
-	B_values=DifFracTion_utils.calculate_distance_decay_individual(distances_B, counts_B, metric=metric)
+	# Here we get a print of the current alpha
+	A_values=DifFracTion_utils.calculate_distance_decay_individual(distances_A, counts_A, metric=metric,verbose=False)
+	B_values=DifFracTion_utils.calculate_distance_decay_individual(distances_B, counts_B, metric=metric,verbose=False)
 	#Arrays here have elements per distance, not per bin
 	
 	new_intercept_A = DifFracTion_utils.refit_intercept(A_values[6], A_values[5], desired_alpha, form='log')
@@ -104,12 +104,18 @@ def iterative_normalization(
 	matrix_B (numpy.ndarray): Second Hi-C contact matrix.
 	resolution (int): Resolution of the Hi-C data in base pairs.
 	metric (str): Metric to use for calculating the scaling factor ('median' or 'mean').
-	
+	weight_factor (float): Weight factor for the iterative normalization. Default is -1.08.
+	eta (float): Convergence threshold for the iterative normalization. Default is 0.15.
+	filter (bool): Whether to filter out overdispersed counts based on CI for normalization. Default is True.
 	Returns:
 	norm_matrix_A (numpy.ndarray): Iteratively normalized first matrix.
 	norm_matrix_B (numpy.ndarray): Iteratively normalized second matrix.
 	"""
-	norm_matrix_A_iterative, norm_matrix_B_iterative = DifFracTion_utils.iterative_correction(matrix_A, matrix_B, resolution, metric=metric, weight_factor=weight_factor, eta=eta, tolerance=1e-6, filter=True, plot=False)
+	norm_matrix_A_iterative, norm_matrix_B_iterative = DifFracTion_utils.iterative_correction(matrix_A, matrix_B, 
+															resolution, metric=metric, 
+															weight_factor=weight_factor, 
+															eta=eta, tolerance=1e-6, 
+															filter=True, plot=False)
 	return norm_matrix_A_iterative, norm_matrix_B_iterative	
 
 def identify_differential_interactions(
