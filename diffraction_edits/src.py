@@ -148,6 +148,6 @@ def identify_differential_interactions(
 	interactions,n_bins=DifFracTion_utils.differential_interactions(norm_matrix_A, norm_matrix_B, resolution, permutations_n=permutations,
                                                     filter_by=filter_by, pvalue_cutoff=pvalue_cutoff, log2fc_cutoff=log2fc_cutoff, 
 										  neighbor_support=neighbor_support, bayesian=bayesian, upper_limit=upper_limit, lower_limit=lower_limit,
-										  adjusted_pvalues_method=adjusted_pvalues_method,do_IF_cutoff=True)
+										  adjusted_pvalues_method=adjusted_pvalues_method,do_cutoff=True)
 	
 	return interactions,n_bins

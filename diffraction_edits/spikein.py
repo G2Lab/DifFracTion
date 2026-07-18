@@ -46,7 +46,7 @@ def select_spikeins(matrix,resolution,
 
 		base_counts = matrix_A[row,col]
 
-		if base_counts < 20:
+		if base_counts < 55:
 			continue
 		 
 		# This is the form 
