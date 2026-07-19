@@ -90,7 +90,7 @@ def plot_MA(matrix_A: np.ndarray,
 		  xscale: str = 'log', 
 		  bayesian: bool = True):
 	if bayesian:
-		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc_bayesian(matrix_A, matrix_B, resolution, lower_limit, upper_limit)
+		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, Avalues_in, Bvalues_in, Avalues_out, Bvalues_out = compute_log2fc_bayesian(matrix_A, matrix_B, resolution, lower_limit, upper_limit)
 	else:
 		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc(matrix_A, matrix_B, resolution, upper_limit, lower_limit)
 
@@ -920,19 +920,19 @@ def differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.ndarr
 	:type do_cutoff: bool
 	'''
 	if do_cutoff:
-		rows, cols, log2fc, pvalues, distances = get_differential_interactions(norm_matrix_A, norm_matrix_B, resolution, 
+		rows, cols, log2fc, pvalues, distances, Avalues, Bvalues = get_differential_interactions(norm_matrix_A, norm_matrix_B, resolution, 
 															  permutations_n=permutations_n, bayesian=bayesian,
 																 upper_limit=upper_limit, lower_limit=lower_limit,do_cutoff=True)
 	else:
-		rows, cols, log2fc, pvalues, distances = get_differential_interactions(norm_matrix_A, norm_matrix_B, resolution, 
+		rows, cols, log2fc, pvalues, distances, Avalues, Bvalues = get_differential_interactions(norm_matrix_A, norm_matrix_B, resolution, 
 															  permutations_n=permutations_n, bayesian=bayesian,
 																 upper_limit=upper_limit, lower_limit=lower_limit,do_cutoff=False)
 	print(f"[1] Total bin pairs tested                          : {len(rows):,}")
 	total_tested = len(rows)
 
 	# If the size of all the elements is not the same, quit
-	if not (len(rows) == len(cols) == len(log2fc) == len(pvalues) == len(distances)):
-		raise ValueError("The lengths of rows, cols, log2fc, pvalues, and distances must be the same.")
+	if not (len(rows) == len(cols) == len(log2fc) == len(pvalues) == len(distances)== len(Avalues) == len(Bvalues)):
+		raise ValueError("The lengths of rows, cols, log2fc, pvalues, distances, Avalues, and Bvalues must be the same.")
 		sys.exit(1)
 		
 	if adjusted_pvalues_method == 'distance':
@@ -948,8 +948,8 @@ def differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.ndarr
 		raise ValueError(f"Unsupported adjusted p-values method: {adjusted_pvalues_method}")
 
 	# Filter by raw pvalue (used when filter_by='pvalue')
-	significant_rows, significant_cols, significant_log2fc, significant_pvalues, significant_adjusted_pvalues, significant_distances = filter_significant_interactions(
-	rows, cols, log2fc, pvalues, adjusted_pvalues, distances, pvalue_cutoff=pvalue_cutoff, log2fc_cutoff=log2fc_cutoff
+	significant_rows, significant_cols, significant_log2fc, significant_pvalues, significant_adjusted_pvalues, significant_distances, significant_Avalues, significant_Bvalues = filter_significant_interactions(
+	rows, cols, log2fc, pvalues, adjusted_pvalues, distances, Avalues, Bvalues, pvalue_cutoff=pvalue_cutoff, log2fc_cutoff=log2fc_cutoff
 	)
 	print(f"[2] Significant by pvalue<={pvalue_cutoff} & |log2fc|>={log2fc_cutoff} : {len(significant_rows):,}")
 
@@ -961,6 +961,8 @@ def differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.ndarr
 	padj_pvalues   = pvalues[mask_padj_full]
 	padj_adjusted  = adjusted_pvalues[mask_padj_full]
 	padj_distances = distances[mask_padj_full]
+	padj_Avalues   = Avalues[mask_padj_full]
+	padj_Bvalues   = Bvalues[mask_padj_full]
 	print(f"[3] Significant by padjusted<={pvalue_cutoff} & |log2fc|>={log2fc_cutoff}: {mask_padj_full.sum():,}")
 
 	#All of these are just significant by pvalue and logfold
@@ -968,6 +970,8 @@ def differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.ndarr
 	'row': significant_rows,
 	'col': significant_cols,
 	'log2fc': significant_log2fc,
+	"condition_A_counts": significant_Avalues,
+	"condition_B_counts": significant_Bvalues,
 	'pvalue': significant_pvalues,
 	'adjusted_pvalue': significant_adjusted_pvalues,
 	'distance': significant_distances
@@ -979,9 +983,11 @@ def differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.ndarr
 
 	# Build padjusted DataFrame independently from the full set
 	sig_by_padj = pd.DataFrame({
-		'row': padj_rows, 'col': padj_cols, 'log2fc': padj_log2fc,
+		'row': padj_rows, 'col': padj_cols, "condition_A_counts": padj_Avalues, 
+		"condition_B_counts": padj_Bvalues, 'log2fc': padj_log2fc,
 		'pvalue': padj_pvalues, 'adjusted_pvalue': padj_adjusted, 'distance': padj_distances
 	})
+
 	sig_by_padj = neighbor_support_f(sig_by_padj)
 	n_support_padj = sig_by_padj['neighbor_support'].sum()
 	print(f"[5] With neighbor support (of padjusted-significant): {n_support_padj:,}")
@@ -1028,7 +1034,7 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 	
 	if bayesian:
 		#Obs rows and cols are the indices of the bins that have valid counts in both matrices, so we can compute log2fc only for those bins. The distances and log2fc arrays will be filtered to only include those bins.
-		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc_bayesian(norm_matrix_A,norm_matrix_B,resolution,lower_limit, upper_limit)
+		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, Avalues_in, Bvalues_in, Avalues_out, Bvalues_out = compute_log2fc_bayesian(norm_matrix_A,norm_matrix_B,resolution,lower_limit, upper_limit)
 		# For permutation test, use raw log2fc so the comparison is not biased by Bayesian shrinkage
 		_, log2_fc_raw, _, log2_fc_raw_out, *_ = compute_log2fc(norm_matrix_A, norm_matrix_B, resolution, upper_limit, lower_limit)
 		raw_log2fc_for_perm = np.concatenate([log2_fc_raw, log2_fc_raw_out]) if log2_fc_raw_out.size else log2_fc_raw
@@ -1060,6 +1066,9 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 	# Use raw log2fc for permutation test when bayesian=True to keep the comparison symmetric
 	obs_log2fc = raw_log2fc_for_perm if bayesian else observed_log2fc
 
+	Avalues = np.concatenate([Avalues_in, Avalues_out]) if Avalues_out.size else Avalues_in
+	Bvalues = np.concatenate([Bvalues_in, Bvalues_out]) if Bvalues_out.size else Bvalues_in
+
 	# Filter all arrays to bins where average cutoff is met, if requested
 
 	
@@ -1072,6 +1081,8 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 		distances      = distances[if_mask]
 		observed_log2fc = observed_log2fc[if_mask]
 		obs_log2fc    = obs_log2fc[if_mask]
+		Avalues         = Avalues[if_mask]
+		Bvalues         = Bvalues[if_mask]
 
 	# _______ Create background matrix for permutation testing _______
 	# ______ Keep all info because we are modeling dispersion in the background too
@@ -1124,7 +1135,7 @@ def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.n
 		obs_rows = obs_rows_f
 		obs_cols = obs_cols_f
 	
-	return obs_rows, obs_cols, observed_log2fc, p_values, distances
+	return obs_rows, obs_cols, observed_log2fc, p_values, distances, Avalues, Bvalues
 
 def adjust_pvalues_by_distance(pvalues, distances, method='fdr_bh'):
 	'''Adjust p-values for multiple testing while accounting for genomic distance.
@@ -1161,7 +1172,7 @@ def adjust_pvalues_global(pvalues, method='fdr_bh'):
 	_, adjusted_pvalues, _, _ = multipletests(pvalues, method=method)
 	return adjusted_pvalues
 
-def filter_significant_interactions(rows, cols, log2fc, pvalues, adjusted_pvalues, distances, pvalue_cutoff=0.05, log2fc_cutoff=1):
+def filter_significant_interactions(rows, cols, log2fc, pvalues, adjusted_pvalues, distances, Avalues, Bvalues, pvalue_cutoff=0.05, log2fc_cutoff=1):
 	'''Filter interactions based on  p-value and log2 fold change cutoffs.
 	Args:
 	rows: array of row indices for interactions
@@ -1179,7 +1190,7 @@ def filter_significant_interactions(rows, cols, log2fc, pvalues, adjusted_pvalue
 	significant_pvalues: array of adjusted p-values for significant interactions
 	significant_distances: array of genomic distances for significant interactions'''
 	significant_mask = (pvalues <= pvalue_cutoff) & (np.abs(log2fc) >= log2fc_cutoff)
-	return rows[significant_mask], cols[significant_mask], log2fc[significant_mask], pvalues[significant_mask], adjusted_pvalues[significant_mask],	 distances[significant_mask]
+	return rows[significant_mask], cols[significant_mask], log2fc[significant_mask], pvalues[significant_mask], adjusted_pvalues[significant_mask],	 distances[significant_mask], Avalues[significant_mask], Bvalues[significant_mask]
 
 def plot_MA_significant(matrix_A, matrix_B, resolution, log2_fc_cutoff, upper_limit=7e6, lower_limit=5e4, xscale='log',sig_rows=None, sig_cols=None):
     distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc(matrix_A, matrix_B, resolution, upper_limit, lower_limit)
@@ -1386,8 +1397,8 @@ def compute_log2fc_bayesian(matrix_A,matrix_B,resolution,lower_limit=5e4, upper_
 	max_d= int(min(n, upper_limit // resolution))
 
     
-	distances_list, log2fc_list, rows_in_list, cols_in_list, IF_list= [], [], [], [], []
-	distances_out_list, log2fc_out_list, rows_out_list, cols_out_list, out_IF_list = [], [], [], [], []
+	distances_list, log2fc_list, rows_in_list, cols_in_list, Avalues_in,Bvalues_in= [], [], [], [], [], []
+	distances_out_list, log2fc_out_list, rows_out_list, cols_out_list, Avalues_out,Bvalues_out= [], [], [], [], [], []
 
 	for d in range(1,n):
 		diag_A=np.asarray(matrix_A.diagonal(d),dtype=np.float64).ravel()
@@ -1416,13 +1427,17 @@ def compute_log2fc_bayesian(matrix_A,matrix_B,resolution,lower_limit=5e4, upper_
 			distances_list.append(np.full(log2fc.size, d_bp, dtype=np.float64))
 			rows_in_list.append(rows_valid) #keep track of the row indices of the valid entries in the diagonal
 			cols_in_list.append(cols_valid) #keep track of the column indices of the valid entries in the diagonal
-			IF_list.append(np.full(log2fc.size, mean_IF, dtype=np.float64))
+			Avalues_in.append(diag_A_valid)
+			Bvalues_in.append(diag_B_valid)
+			#IF_list.append(np.full(log2fc.size, mean_IF, dtype=np.float64))
 		else:
 			log2fc_out_list.append(log2fc)
 			distances_out_list.append(np.full(log2fc.size, d_bp, dtype=np.float64))
 			rows_out_list.append(rows_valid) #keep track of the row indices of the valid entries in the diagonal
 			cols_out_list.append(cols_valid) #keep track of the column indices of the valid entries in the diagonal
-			out_IF_list.append(np.full(log2fc.size, mean_IF, dtype=np.float64))
+			Avalues_out.append(diag_A_valid)
+			Bvalues_out.append(diag_B_valid)
+			#out_IF_list.append(np.full(log2fc.size, mean_IF, dtype=np.float64))
 		
 	obs_rows = np.concatenate(rows_in_list + rows_out_list) if (rows_in_list or rows_out_list) else np.array([], dtype=int)
 	obs_cols = np.concatenate(cols_in_list + cols_out_list) if (cols_in_list or cols_out_list) else np.array([], dtype=int)
@@ -1432,11 +1447,12 @@ def compute_log2fc_bayesian(matrix_A,matrix_B,resolution,lower_limit=5e4, upper_
 	distances_out     = np.concatenate(distances_out_list)     if distances_out_list     else np.array([])
 	log2fc_values_out = np.concatenate(log2fc_out_list)        if log2fc_out_list        else np.array([])
 	
-	IF_values = np.concatenate(IF_list) if IF_list else np.array([])
-	out_IF_values = np.concatenate(out_IF_list) if out_IF_list else np.array([])
+	Avalues = np.concatenate(Avalues_in) if Avalues_in else np.array([])
+	Bvalues = np.concatenate(Bvalues_in) if Bvalues_in else np.array([])
+	Avalues_out = np.concatenate(Avalues_out) if Avalues_out else np.array([])
+	Bvalues_out = np.concatenate(Bvalues_out) if Bvalues_out else np.array([])
 
-	return distances, log2fc_values, distances_out, log2fc_values_out, obs_rows, obs_cols, IF_values, out_IF_values
-
+	return distances, log2fc_values, distances_out, log2fc_values_out, obs_rows, obs_cols, Avalues, Bvalues, Avalues_out, Bvalues_out
 
 
 # ------- Plot decays
