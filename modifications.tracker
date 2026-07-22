@@ -1,6 +1,0 @@
-# Any other modification will be automatically reflected on the package without reinstalling
-pip install -e .
-
-
-# Copy of the main code, we are working on making a whole new version that uses less memory 
-diffraction_backup/ 

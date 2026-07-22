@@ -3,7 +3,7 @@
 *.mcool
 *.cool
 *.hic.1
-
+*gz
 *ipynb
 
 # results folders

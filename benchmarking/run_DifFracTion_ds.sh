@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --time=40:00:00
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=70G
+#SBATCH --mem=90G
 #SBATCH --output=./PBS/ds_diffraction_%x.out
 #SBATCH --error=./PBS/ds_diffraction_%x.err
 

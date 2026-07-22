@@ -98,7 +98,7 @@ echo "----------------------------------------"
 echo "[DifFracTion] [INFO] Generating input files for benchmarking (spike in detection) ..."
 echo "----------------------------------------"
 
-generate_inputs=true
+generate_inputs=false
 run_all_tools=false
 
 if $generate_inputs; then
@@ -167,7 +167,7 @@ if $run_all_tools; then
      echo "----------------------------------------"
 
      HiCcompare_dir=$(realpath "../results_spikeins/HiCcompare/${chrom}_${resolution}_${kspike}/input_files/")
-     #sbatch run_HiCcompare.sh ${HiCcompare_dir} ${chrom} ${resolution} ${kspike} ${p_val_threshold}
+     sbatch run_HiCcompare.sh ${HiCcompare_dir} ${chrom} ${resolution} ${kspike} ${p_val_threshold}
 
      echo "[DifFracTion] [INFO] HiCcompare Output ${HiCcompare_dir}/results_spikeins/HiCcompare/${chrom}_${resolution}_${kspike}/performance/ "
      echo "----------------------------------------"
@@ -193,6 +193,36 @@ if $run_all_tools; then
      echo "[DifFracTion] [INFO] multiHiCcompare Output ${multiHiCcompare_dir}/results_spikeins/multiHiCcompare/${chrom}_${resolution}_${kspike}/performance/ "
      echo "----------------------------------------"
 
+else 
+     echo "[DifFracTion] [INFO] Only evaluating tool [name] for spike in detection. Set run_all_tools=true to evaluate all tools."
+     echo "[DifFracTion] [INFO] Starting evaluation of all tools (DifFraction, diffHiC, HiCcompare, HiCDCPlus, multiHiCcompare) for spike in detection..."
+     echo "----------------------------------------"
+     echo "[DifFracTion] [INFO] Evaluating DifFracTion..."
+     echo "[DifFracTion] [INFO] ../results_spikeins/DifFracTion/${chrom}_${resolution}_${kspike}/input_files/ "
+     echo "----------------------------------------"
+     diffraction_dir=$(realpath "../results_spikeins/DifFracTion/${chrom}_${resolution}_${kspike}/input_files/")
+     mkdir -p $(dirname ${diffraction_dir})/performance/
+     matrix_A=$(find ${diffraction_dir} -name "*spike*.npz" | head -1)
+     matrix_B=$(find ${diffraction_dir} -name "*kb.npz" | head -1)
+     sbatch run_DifFracTion.sh --matrixA ${matrix_A}  \
+                               --matrixB ${matrix_B} \
+                               --chrom $chrom \
+                               --resolution $resolution \
+                               --pval $p_val_threshold \
+                               --type_norm alpha \
+                               --adjusted_pvalues_method distance \
+                               --output_dir $(dirname ${diffraction_dir})/performance/
+     sbatch run_DifFracTion.sh --matrixA ${matrix_A}  \
+                               --matrixB ${matrix_B} \
+                               --chrom $chrom \
+                               --resolution $resolution \
+                               --pval $p_val_threshold \
+                               --type_norm iterative \
+                               --adjusted_pvalues_method distance \
+                               --output_dir $(dirname ${diffraction_dir})/performance/
+     echo "[DifFracTion] [INFO] DifFracTion jobs submitted."
+     echo "[DifFracTion] [INFO] DifFracTion Output $(dirname ${diffraction_dir})/performance/"
+     echo "----------------------------------------"
 fi
 
 # Some tools filter out spikes in their filtering steps, which leads to have negative values on TN, because we are calculating it as TN=n_tests - TP -FP - FN. And TP and FN are calculated based on the known spike-ns.

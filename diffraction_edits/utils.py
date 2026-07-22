@@ -756,11 +756,20 @@ def iterative_correction(matrix_A, matrix_B, resolution,metric='median',
 
 	per_distance_factors = G * (ref_values[1] / to_scale_values[1])
 
-	matrix_A_norm_iterative = matrix_A.astype(np.float64).copy()
-	matrix_B_norm_iterative = apply_decay_factors(matrix_B.astype(np.float64).copy(), per_distance_factors,
-							unique_distances, resolution, outside_range='interp')
+	scale_B = counts_A1.sum() >= counts_B1.sum() # True if A is the reference aka has more counts, False if B is the reference aka has more counts
 	
-	matrix_A_norm_iterative,matrix_B_norm_iterative=np.asarray(matrix_A_norm_iterative),np.asarray(matrix_B_norm_iterative)	
+	if scale_B:
+		# A had more counts → A is ref, B is to_scale → apply factors to B
+		matrix_A_norm_iterative = matrix_A.astype(np.float64).copy()
+		matrix_B_norm_iterative = apply_decay_factors(matrix_B.astype(np.float64).copy(), per_distance_factors,
+								unique_distances, resolution, outside_range='interp')
+	else:
+		# B had more counts → B is ref, A is to_scale → apply factors to A
+		matrix_A_norm_iterative = apply_decay_factors(matrix_A.astype(np.float64).copy(), per_distance_factors,
+								unique_distances, resolution, outside_range='interp')
+		matrix_B_norm_iterative = matrix_B.astype(np.float64).copy()
+
+	matrix_A_norm_iterative,matrix_B_norm_iterative=np.asarray(matrix_A_norm_iterative),np.asarray(matrix_B_norm_iterative)
 
 	return matrix_A_norm_iterative, matrix_B_norm_iterative
 
