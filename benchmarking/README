@@ -38,10 +38,12 @@ Stansfield JC, Cresswell KG, Dozmorov MG (2019). “multiHiCcompare: joint norma
 
 # Generate environment
 
+```bash
 mamba env create -f ../environment_benchmarking.yml
+```
 
 # Benchmarking execution - Spikes
-```
+```bash
 # inside benchmarking
 
 hic_path=$(realpath "../test_data/GM12878-HRC.hic")
@@ -66,12 +68,11 @@ done
 ```
 
 # Benchmarking execution - Downsample
-```
-
+```bash
 
 hic_path=$(realpath "../test_data/GM12878-HRC.hic")
-chromosomes=$(seq 1 22)
-resolutions=(10000 50000 100000 250000)
+chromosomes=$(seq 1 23)
+resolutions=(10000)
 pval=(0.01)
 
 ds=(0.1 0.25 0.5 0.75 1.0)
@@ -91,12 +92,11 @@ done
 ```
 
 # Benchmarking execution - Downsample and spikes
-```
-
+```bash
 
 hic_path=$(realpath "../test_data/GM12878-HRC.hic")
 chromosomes=$(seq 1 22)
-resolutions=(50000 10000)
+resolutions=(50000 10000 100000 250000)
 
 pval=(0.01)
 
