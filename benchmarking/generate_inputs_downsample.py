@@ -27,6 +27,7 @@ def parse_args():
      parser.add_argument("-c", "--chrom", required=True, help="Chromosome to process (e.g., 1)")
      parser.add_argument("-r", "--resolution", type=int, required=True, help="Resolution (bin size) in bp")
      parser.add_argument("-d","--downsample_factor", type=float, default=1.0, required=True, help="Downsample factor. Default: 1.0")
+     parser.add_argument("-t", "--tool", choices=['diffraction', 'HiCcompare', 'multiHiCcompare', 'diffHic', 'HiCDCPlus'], default=None, help="Tool to generate input files for. Default: all tools")
      return parser.parse_args()
 
 args = parse_args()
@@ -75,65 +76,62 @@ def main():
           dictionary_paths[tool_name] = input_files_output_dir
 
 
-     for tool_name in tool_names:
-          #Now we have the matrices saved so we just load them
-          if tool_name == 'DifFracTion':
-               #change npz for {ds} and .npz for {ds}_downsampled
-               downsampled_diffraction_B_name = dictionary_paths[tool_name] + os.path.splitext(os.path.basename(name_matrix))[0] + f"_downsampled_{args.downsample_factor}.npz"
-               downsampled_diffraction_A_name = dictionary_paths[tool_name] + os.path.splitext(os.path.basename(name_matrix))[0] + ".npz"
-              
-               print(downsampled_diffraction_B_name)
-               if not os.path.exists(downsampled_diffraction_B_name):
-                    downsampled_diffraction_B = DifFracTion_utils.synthetic_datasets(raw_matrix, args.downsample_factor)
-                    downsampled_diffraction_B = scipy.sparse.csr_matrix(downsampled_diffraction_B)
-                    scipy.sparse.save_npz(downsampled_diffraction_B_name, downsampled_diffraction_B)
-
-               if not os.path.exists(downsampled_diffraction_A_name):
-                    downsampled_diffraction_A = scipy.sparse.csr_matrix(raw_matrix)
-                    scipy.sparse.save_npz(downsampled_diffraction_A_name, downsampled_diffraction_A)
-
-                    #When loading do the same matrix = DifFracTion_utils.load_dense_matrix("path/to/output.npz")
-          
-          if tool_name == 'HiCcompare':
-               save_path = (
-                    f"{dictionary_paths['HiCcompare']}/HiCcompare_input_chr{args.chrom}_res{args.resolution}_ds{args.downsample_factor}.table"
-               )
-               print(save_path)
-               if not os.path.exists(save_path):
-                    hiccompare,hiccompare_out= DifFracTion_bench.generate_HiCcompare_input_ds(raw_matrix, 
-                                             args.chrom, args.resolution, args.downsample_factor,
-                                             dictionary_paths['HiCcompare'])
-               
-          if tool_name == 'diffHic':
-               save_path = (
-                    f"{dictionary_paths['diffHic']}/diffHic_input_chr{args.chrom}_res{args.resolution}_ds{args.downsample_factor}.table"
-               )
-               if not os.path.exists(save_path):
-                    diffHic_out = DifFracTion_bench.generate_diffHic_input_ds(raw_matrix,
-                                             args.chrom, args.resolution, args.downsample_factor,
-                                             dictionary_paths['diffHic'])
-
-          if tool_name == 'multiHiCcompare':
-               # All files will have the downsample tag but IF_A1,IF_A2 are full depth
-               save_path = (
-                    f"{dictionary_paths['multiHiCcompare']}/multiHiCcompare_input_chr{args.chrom}_res{args.resolution}_ds{args.downsample_factor}_IF_A1.table"
-               )
-               if not os.path.exists(save_path):
-                    multiHiCcompare_outA1, multiHiCcompare_outA2, multiHiCcompare_outB1, multiHiCcompare_outB2 = DifFracTion_bench.generate_multiHiCcompare_input_ds(raw_matrix,
+     
+     #Now we have the matrices saved so we just load them
+     if args.tool == 'DifFracTion' or args.tool is None:
+          #change npz for {ds} and .npz for {ds}_downsampled
+          downsampled_diffraction_B_name = dictionary_paths['DifFracTion'] + os.path.splitext(os.path.basename(name_matrix))[0] + f"_downsampled_{args.downsample_factor}.npz"
+          downsampled_diffraction_A_name = dictionary_paths['DifFracTion'] + os.path.splitext(os.path.basename(name_matrix))[0] + ".npz"
+         
+          print(downsampled_diffraction_B_name)
+          if not os.path.exists(downsampled_diffraction_B_name):
+               downsampled_diffraction_B = DifFracTion_utils.synthetic_datasets(raw_matrix, args.downsample_factor)
+               downsampled_diffraction_B = scipy.sparse.csr_matrix(downsampled_diffraction_B)
+               scipy.sparse.save_npz(downsampled_diffraction_B_name, downsampled_diffraction_B)
+          if not os.path.exists(downsampled_diffraction_A_name):
+               downsampled_diffraction_A = scipy.sparse.csr_matrix(raw_matrix)
+               scipy.sparse.save_npz(downsampled_diffraction_A_name, downsampled_diffraction_A)
+               #When loading do the same matrix = DifFracTion_utils.load_dense_matrix("path/to/output.npz")
+     
+     if args.tool == 'HiCcompare' or args.tool is None:
+          save_path = (
+               f"{dictionary_paths['HiCcompare']}/HiCcompare_input_chr{args.chrom}_res{args.resolution}_ds{args.downsample_factor}.table"
+          )
+          print(save_path)
+          if not os.path.exists(save_path):
+               hiccompare,hiccompare_out= DifFracTion_bench.generate_HiCcompare_input_ds(raw_matrix, 
                                         args.chrom, args.resolution, args.downsample_factor,
-                                        dictionary_paths['multiHiCcompare'])
-#
-          if tool_name == 'HiCDCPlus':
-               # All files will have the downsample tag but A1,A2 are full depth
-               save_path = (
-                    f"{output_path}/HiCDCPlus_input_chr{args.chrom}_res{args.resolution}_ds{args.downsample_factor}_B2.table"
-               )
-               if not os.path.exists(save_path):
-                    HiCDCPlus_outA,HiCDCPlus_outA2,HiCDCPlus_outB,HiCDCPlus_outB2 = DifFracTion_bench.generate_HiCDCPlus_input_ds(raw_matrix,
-                                        args.chrom, args.resolution, args.downsample_factor,
-                                        dictionary_paths['HiCDCPlus'])
-	
+                                        dictionary_paths['HiCcompare'])
           
+     if args.tool == 'diffHic' or args.tool is None:
+          save_path = (
+               f"{dictionary_paths['diffHic']}/diffHic_input_chr{args.chrom}_res{args.resolution}_ds{args.downsample_factor}.table"
+          )
+          if not os.path.exists(save_path):
+               diffHic_out = DifFracTion_bench.generate_diffHic_input_ds(raw_matrix,
+                                        args.chrom, args.resolution, args.downsample_factor,
+                                        dictionary_paths['diffHic'])
+     if args.tool == 'multiHiCcompare' or args.tool is None:
+          # All files will have the downsample tag but IF_A1,IF_A2 are full depth
+          save_path = (
+               f"{dictionary_paths['multiHiCcompare']}/multiHiCcompare_input_chr{args.chrom}_res{args.resolution}_ds{args.downsample_factor}_IF_A1.table"
+          )
+          if not os.path.exists(save_path):
+               multiHiCcompare_outA1, multiHiCcompare_outA2, multiHiCcompare_outB1, multiHiCcompare_outB2 = DifFracTion_bench.generate_multiHiCcompare_input_ds(raw_matrix,
+                                   args.chrom, args.resolution, args.downsample_factor,
+                                   dictionary_paths['multiHiCcompare'])
+
+     if args.tool == 'HiCDCPlus' or args.tool is None:
+          # All files will have the downsample tag but A1,A2 are full depth
+          save_path = (
+               f"{output_path}/HiCDCPlus_input_chr{args.chrom}_res{args.resolution}_ds{args.downsample_factor}_B2.table"
+          )
+          if not os.path.exists(save_path):
+               HiCDCPlus_outA,HiCDCPlus_outA2,HiCDCPlus_outB,HiCDCPlus_outB2 = DifFracTion_bench.generate_HiCDCPlus_input_ds(raw_matrix,
+                                   args.chrom, args.resolution, args.downsample_factor,
+                                   dictionary_paths['HiCDCPlus'])
+
+     
                                         
 if __name__ == "__main__":
     main()

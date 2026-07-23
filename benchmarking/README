@@ -42,79 +42,64 @@ Stansfield JC, Cresswell KG, Dozmorov MG (2019). “multiHiCcompare: joint norma
 mamba env create -f ../environment_benchmarking.yml
 ```
 
-# Benchmarking execution - Spikes
+# Benchmarking execution
+
 ```bash
 # inside benchmarking
 
 hic_path=$(realpath "../test_data/GM12878-HRC.hic")
-chromosomes=$(seq 1 22)
-resolutions=(10000 50000 100000 250000 500000)
-pval=(0.01)
-k_spikes=(2 3 4)
 
-
-for resolution in ${resolutions[@]}; do
-    for chromosome in ${chromosomes[@]};do
-        for p_val in ${pval[@]}; do
-            for k in ${k_spikes[@]}; do
-                sbatch --job-name=Benchmarking_DifFraction_spikes_chr${chromosome}_res${resolution} \
-                    run_benchmarking_spikes.sh \
-                    -f ${hic_path} -c ${chromosome} -r ${resolution} -k ${k} -p ${p_val}
+# Submits one job per (chromosome x resolution x pval) combination.
+# Any extra flags (e.g. -d 0.5 -k 3) are forwarded to the script.
+# Usage: submit_jobs <script> <job_prefix> [extra flags...]
+submit_jobs() {
+    local script=$1 prefix=$2; shift 2
+    for r in "${resolutions[@]}"; do
+        for c in "${chromosomes[@]}"; do
+            for p in "${pval[@]}"; do
+                sbatch --job-name="${prefix}_chr${c}_res${r}" \
+                    "$script" -f "$hic_path" -c "$c" -r "$r" -p "$p" "$@"
             done
         done
     done
-done
-
+}
 ```
 
-# Benchmarking execution - Downsample
+## Spikes
 ```bash
-
-hic_path=$(realpath "../test_data/GM12878-HRC.hic")
-chromosomes=$(seq 1 23)
-resolutions=(10000)
-pval=(0.01)
-
-ds=(0.1 0.25 0.5 0.75 1.0)
-
-for resolution in ${resolutions[@]}; do
-    for chromosome in ${chromosomes[@]};do
-        for p_val in ${pval[@]}; do
-            for d in ${ds[@]}; do
-                sbatch --job-name=ds_Benchmarking_DifFracTion_chr${chromosome}_res${resolution}_ds${d} \
-                    run_benchmarking_downsample.sh \
-                    -f ${hic_path} -c ${chromosome} -r ${resolution} -d ${d} -p ${p_val}
-            done
-        done
-    done
-done
-
-```
-
-# Benchmarking execution - Downsample and spikes
-```bash
-
-hic_path=$(realpath "../test_data/GM12878-HRC.hic")
-chromosomes=$(seq 1 22)
-resolutions=(50000 10000 100000 250000)
-
-pval=(0.01)
-
-ds=(0.1 0.25 0.5 0.75 1.0)
+chromosomes=($(seq 1 22)); resolutions=(50000 100000 250000); pval=(0.01)
 k_spikes=(2 3 4)
 
-for resolution in ${resolutions[@]}; do
-    for chromosome in ${chromosomes[@]};do
-        for p_val in ${pval[@]}; do
-            for d in ${ds[@]}; do
-                for k in ${k_spikes[@]}; do
-                    sbatch --job-name=ds_Benchmarking_DifFracTion_chr${chromosome}_res${resolution}_ds${d}_k${k} \
-                        run_benchmarking_downsample_n_spikes.sh \
-                        -f ${hic_path} -c ${chromosome} -r ${resolution} -d ${d} -p ${p_val} -k ${k}
-                done
-            done
-        done
-    done
+for k in "${k_spikes[@]}"; do
+    submit_jobs run_benchmarking_spikes.sh "Benchmarking_DifFraction_spikes" -k "$k"
+done
+```
+
+## Downsample
+```bash
+chromosomes=($(seq 1 23)); resolutions=(50000 100000 250000); pval=(0.01)
+ds=(0.1 0.25 0.75 1.0)
+
+# Run all tools (default)
+for d in "${ds[@]}"; do
+    submit_jobs run_benchmarking_downsample.sh "ds_Benchmarking_ds${d}" -d "$d"
 done
 
+# Run a specific tool only: -s diffraction | diffHiC | HiCcompare | HiCDCPlus | multiHiCcompare
+# Add -t alpha|iterative|both when using -s diffraction
+for d in "${ds[@]}"; do
+    submit_jobs run_benchmarking_downsample.sh "ds_Benchmarking_diffraction_ds${d}" -d "$d" -s diffraction -t both
+done
+```
+
+## Downsample and spikes
+```bash
+chromosomes=($(seq 1 22)); resolutions=(50000 100000 250000); pval=(0.01)
+ds=(0.1 0.25 0.5 0.75 1.0); k_spikes=(2 3 4)
+
+for d in "${ds[@]}"; do
+    for k in "${k_spikes[@]}"; do
+        submit_jobs run_benchmarking_downsample_n_spikes.sh "ds_Benchmarking_DifFracTion_ds${d}_k${k}" -d "$d" -k "$k"
+    done
+done
 ```

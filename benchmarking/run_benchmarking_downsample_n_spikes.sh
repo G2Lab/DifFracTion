@@ -100,14 +100,20 @@ echo "----------------------------------------"
 echo "[DifFracTion] [INFO] Generating input files for benchmarking..."
 echo "----------------------------------------"
 
-cd ..
-python -m benchmarking.generate_inputs_downsample_n_spikes --hic $hic --chrom $chrom --resolution $resolution --downsample_factor $downsample_factor --k_spikes $k_spikes
-cd benchmarking
+run_all_tools=false
+generate_inputs=false
+
+if generate_inputs; then
+    echo "[DifFracTion] [INFO] Generating input files for benchmarking..."
+    cd ..
+    python -m benchmarking.generate_inputs_downsample_n_spikes --hic $hic --chrom $chrom --resolution $resolution --downsample_factor $downsample_factor --k_spikes $k_spikes
+    cd benchmarking
+fi
 
 echo "[DifFracTion] [INFO] Input files generation completed."
 echo "----------------------------------------"
 
-run_all_tools=true
+
 
 if $run_all_tools; then
      echo "[DifFracTion] [INFO] Starting evaluation of all tools (DifFraction, diffHiC, HiCcompare, HiCDCPlus, multiHiCcompare) for spike in detection..."
@@ -197,4 +203,38 @@ if $run_all_tools; then
      sbatch run_multiHiCcompare.sh ${multiHiCcompare_dir} ${chrom} ${resolution} ${k_spikes} ${p_val_threshold}
      echo "----------------------------------------"
      echo "----------------------------------------"
+else
+ # --- DifFracTion ---
+     echo "[DifFracTion] [INFO] Evaluating DifFracTion..."
+     echo "[DifFracTion] [INFO] ../results_downsample_n_spikes/DifFracTion/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/ "
+     echo "----------------------------------------"
+     diffraction_dir=$(realpath "../results_downsample_n_spikes/DifFracTion/${chrom}_${resolution}_${downsample_factor}_${k_spikes}/input_files/")
+     matrix_B=$(find ${diffraction_dir} -name "*downsampled*.npz" | head -1)
+     matrix_A=$(find ${diffraction_dir} -name "*kb.npz" | head -1)
+     echo "[DifFracTion] [INFO] DifFracTion inputs:"
+     echo "  matrixB (downsampled): ${matrix_B}"
+     echo "  matrixA (original + spike-ins):    ${matrix_A}"
+     echo "  downsample_factor: ${downsample_factor} k_spikes: ${k_spikes}"
+     echo "  chrom: ${chrom}  resolution: ${resolution}  pval: ${p_val_threshold} "
+     echo "  output_dir: $(dirname ${diffraction_dir})/performance/"
+     echo "  [norm: alpha]"
+     echo "  [norm: iterative]"
+     sbatch run_DifFracTion.sh --matrixA ${matrix_A}  \
+                              --matrixB ${matrix_B} \
+                              --chrom $chrom \
+                              --resolution $resolution \
+                              --pval $p_val_threshold \
+                              --type_norm alpha \
+                              --adjusted_pvalues_method distance \
+                              --output_dir $(dirname ${diffraction_dir})/performance/
+     sbatch run_DifFracTion.sh --matrixA ${matrix_A}  \
+                              --matrixB ${matrix_B} \
+                              --chrom $chrom \
+                              --resolution $resolution \
+                              --pval $p_val_threshold \
+                              --type_norm iterative \
+                              --adjusted_pvalues_method distance \
+                              --output_dir $(dirname ${diffraction_dir})/performance/
+     echo "----------------------------------------"
+
 fi
