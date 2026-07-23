@@ -1,41 +1,3 @@
-# Benchmarking papers
-
-```
-Jorge, E., Foissac, S., Neuvial, P., Zytnicki, M., & Vialaneix, N. (2025). A comprehensive review and benchmark of differential analysis tools for Hi-C data. Briefings in Bioinformatics, 26(2), bbaf074.
-
-Zheng, Y., Zhou, P., & Keleş, S. (2021). FreeHi-C spike-in simulations for benchmarking differential chromatin interaction detection. Methods, 189, 3-11.
-
-```
-
-# Tools references
-
-
-```
-diffHiC:
-
-Lun ATL, Smyth GK (2015). “diffHic: a Bioconductor package to detect differential genomic interactions in Hi-C data.” BMC Bioinformatics, 16, 258.
-
-[diffHiC](https://www.bioconductor.org/packages/release/bioc/html/diffHic.html)
-
-```
-
-```
-HiCcompare:
-
-Stansfield JC, Cresswell KG, Vladimirov VI, Dozmorov MG (2018). “HiCcompare: an R-package for joint normalization and comparison of HI-C datasets.” BMC Bioinformatics, 19(1). doi:10.1186/s12859-018-2288-x, https://github.com/dozmorovlab/HiCcompare.
-
-[HiCcompare](https://bioconductor.org/packages/release/bioc/html/HiCcompare.html)
-
-```
-
-```
-multiHiCcompare:
-
-Stansfield JC, Cresswell KG, Dozmorov MG (2019). “multiHiCcompare: joint normalization and comparative analysis of complex Hi-C experiments.” Bioinformatics, 35(17). doi:10.1093/bioinformatics/btz048, https://github.com/dozmorovlab/multiHiCcompare.
-
-[multiHiCcompare](https://www.bioconductor.org/packages/release/bioc/html/multiHiCcompare.html)
-```
-
 # Generate environment
 
 ```bash
@@ -85,10 +47,14 @@ for d in "${ds[@]}"; do
     submit_jobs run_benchmarking_downsample.sh "ds_Benchmarking_ds${d}" -d "$d"
 done
 
-# Run a specific tool only: -s diffraction | diffHiC | HiCcompare | HiCDCPlus | multiHiCcompare
+# Run a specific tool only: -s diffraction | diffHic | HiCcompare | HiCDCPlus | multiHiCcompare
 # Add -t alpha|iterative|both when using -s diffraction
 for d in "${ds[@]}"; do
     submit_jobs run_benchmarking_downsample.sh "ds_Benchmarking_diffraction_ds${d}" -d "$d" -s diffraction -t both
+done
+
+for d in "${ds[@]}"; do
+    submit_jobs run_benchmarking_downsample.sh "ds_Benchmarking_diffraction_ds${d}" -d "$d" -s diffHic 
 done
 ```
 
