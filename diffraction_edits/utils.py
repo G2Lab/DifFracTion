@@ -97,15 +97,15 @@ def plot_MA(matrix_A: np.ndarray,
 	# If there are no points outside the range, we can just plot the points within the range
 	all_distances = np.concatenate([distances, distances_out]) if distances_out.size else distances
 	all_log2fc    = np.concatenate([log2_fc,   log2_fc_out])   if log2_fc_out.size   else log2_fc
-	all_IF        = np.concatenate([IF_values, IF_values_out]) if IF_values_out.size else IF_values
+	#all_IF        = np.concatenate([IF_values, IF_values_out]) if IF_values_out.size else IF_values
 
-	IF_90th_percentile = np.percentile(all_IF, 95)
+	#IF_90th_percentile = np.percentile(all_log2fc, 95)
 
 	fig = plt.figure(figsize=(8, 6), dpi=200)
 
 	plt.scatter(all_distances, all_log2fc, alpha=0.5, s=1, 
-		   		c=all_IF, cmap='RdYlBu_r',vmax=IF_90th_percentile)
-	plt.colorbar(label='Mean Interaction Frequency (IF)')
+		   		c=all_log2fc, cmap='RdYlBu_r')
+	plt.colorbar(label='Log2 Fold Change (Sample A / Sample B)')
 	plt.hlines(0,  xmin=0, xmax=all_distances.max(), colors='red',  linestyles='dashed')
 	plt.hlines( log2_fc_cutoff, xmin=0, xmax=all_distances.max(), colors='gray', linestyles='dashed')
 	plt.hlines(-log2_fc_cutoff, xmin=0, xmax=all_distances.max(), colors='gray', linestyles='dashed')
@@ -692,8 +692,8 @@ def iterative_correction(matrix_A, matrix_B, resolution,metric='median',
 	unique_distances = ref_values[0]
 	n_distances = len(ref_values[0])
 
-	best_error        = np.full(n_distances, np.inf)
-	global_best_error = float('inf')
+	best_error = np.abs(np.log(ref_values[1]) - np.log(to_scale_values[1]))
+	global_best_error = np.mean(best_error)
 	max_i = n_distances - 1
 	cycle = 1
 	G     = 1.0  # accumulated global scaling applied to to_scale_counts
