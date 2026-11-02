@@ -13,11 +13,10 @@ dependencies = [
     "pandas",
     "scipy",
     "cooler",
-    "statsmodels"
+    "statsmodels",
+    "matplotlib",
+    "hic-straw"
 ]
 
 [tool.setuptools]
 packages = ["diffraction"]
-
-[project.optional-dependencies]
-plot = ["matplotlib"]
