@@ -29,7 +29,7 @@ submit_jobs() {
 
 ## Spikes
 ```bash
-chromosomes=($(seq 1 22)); resolutions=(50000 100000 250000); pval=(0.01)
+chromosomes=($(seq 1 23)); resolutions=(50000 100000 250000); pval=(0.01)
 k_spikes=(2 3 4)
 
 for k in "${k_spikes[@]}"; do
@@ -60,7 +60,7 @@ done
 
 ## Downsample and spikes
 ```bash
-chromosomes=($(seq 1 22)); resolutions=(50000 100000 250000); pval=(0.01)
+chromosomes=($(seq 1 23)); resolutions=(50000 100000 250000); pval=(0.01)
 ds=(0.1 0.25 0.5 0.75 1.0); k_spikes=(2 3 4)
 
 for d in "${ds[@]}"; do

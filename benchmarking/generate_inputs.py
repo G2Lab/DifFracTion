@@ -6,11 +6,11 @@ import pandas as pd
 import argparse
 import scipy.sparse
 
-import diffraction_edits
-from diffraction_edits import src as DifFracTion
-from diffraction_edits import utils as DifFracTion_utils
-from diffraction_edits import spikein as DifFracTion_spikein
-from diffraction_edits import benchmarking as DifFracTion_bench
+import diffraction
+from diffraction import src as DifFracTion
+from diffraction import utils as DifFracTion_utils
+from diffraction import spikein as DifFracTion_spikein
+from diffraction import benchmarking as DifFracTion_bench
 
 '''REAL DATA BENCHMARKING - SPIKE-INS
 no downsampling

@@ -4,13 +4,21 @@
 *.cool
 *.hic.1
 *gz
+
 *ipynb
+!DifFracTion_Tutorial.ipynb
 
 # results folders
 test_data/*
 generated_data/*
+!generated_data/K562_chr19_10kb.npz
+!generated_data/GM12878_chr19_10kb.npz
+!generated_data/TransverseColon_chr19_10kb.npz
+!generated_data/GastrocnemiusMedialis_chr19_10kb.npz
 results_downsample/*
 results_spikeins/*
 results_downsample_n_spikes/*
 benchmarking/PBS/*
 analyses/*
+validation/*
+graveyard/*

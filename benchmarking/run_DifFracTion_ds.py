@@ -17,8 +17,8 @@ import argparse
 import matplotlib.pyplot as plt
 from matplotlib import colors
 
-from diffraction_edits import utils as DifFracTion_utils
-from diffraction_edits import src as DifFracTion
+from diffraction import utils as DifFracTion_utils
+from diffraction import src as DifFracTion
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run DifFracTion on a given dataset')

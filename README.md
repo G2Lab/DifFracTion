@@ -1,15 +1,28 @@
 # DiFracTion Installation
-
+```bash
      git clone https://github.com/g2lab/DifFracTion.git
+
      cd DifFracTion
-     # if mamba is available change it
+
      conda env create -f environment.yml
      conda activate diffraction
      pip install .
+```
 
+## Validation Data
+
+Pre-processed chr19 Hi-C matrices at 10kb resolution are provided for quick validation of the DifFracTion pipeline. These files are included in the repository under `generated_data/` and can be used directly as inputs without downloading the full `.hic` files.
+
+| File | Cell type / Tissue |
+|------|--------------------|
+| `generated_data/K562_chr19_10kb.npz` | K562 (chronic myelogenous leukemia) |
+| `generated_data/GM12878_chr19_10kb.npz` | GM12878 (lymphoblastoid) |
+| `generated_data/TransverseColon_chr19_10kb.npz` | Transverse colon |
+| `generated_data/GastrocnemiusMedialis_chr19_10kb.npz` | Gastrocnemius medialis (skeletal muscle) |
 
 Data used in this study corresponds to cell line GM12878 and was retrieved from GSE63525 accession number:
 
+```bash
      mkdir test_data/
      cd test_data/
 
@@ -25,31 +38,38 @@ Data used in this study corresponds to cell line GM12878 and was retrieved from 
      wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63525/suppl/GSE63525_K562_combined_30.hic
      mv GSE63525_K562_combined_30.hic K562-HRC.hic
 
+```
+
 The DiFfracTion_Tutorial notebook offers a walkthough to the main DifFracTion functions:
-     
+
+```python
      DifFracTion.alpha_normalization()
      DifFracTion.iterative_normalization()
      DifFracTion.identify_differential_interactions()
-
+```
 ## Normalization
 
 The inputs to alpha_normalization() and iterative_normalization() are two $n x n $ chromosome-level balanced Hi-C matrices (e.g., KR or any other balancing method), referred to as matrixA and matrixB, along with the length of the corresponding chromosome and the matrix resolution in base pairs.
      
-     matrix_A_norm,matrix_B_norm,_,_ = DifFracTion.alpha_normalization(matrix_A,matrix_B,chromosome_length,resolution)
-
-     matrix_A_norm_iter,matrix_B_norm_iter,_,_ = DifFracTion.iterative_normalization(matrix_A,matrix_B,chromosome_length,resolution)
+     norm_matrix_A, norm_matrix_B = DifFracTion.alpha_normalization(matrix_A,matrix_B,
+     resolution,metric='median',desired_alpha=1.08,filter=True)
+        
+     norm_matrix_A_iterative, norm_matrix_B_iterative = DifFracTion.iterative_normalization(matrix_A, matrix_B, resolution, metric='median',weight_factor=-1.08,filter=True)
+        
 
 Both functions output the fully normalized upper triangles of both matrices in plain-text format.
 
+Please refer to the function vignettes for parameter details.
+
 ## DCIs
 
-For identify_differential_interactions(), we strongly recommend using a high-performance computing (HPC) system, as the subsampling procedure generates 
-$2N$ additional Hi-C matrices to construct the null distribution, which is later used to test for significance. Ideal results are observed with $N=1000$ subsampling iterations.
+For identify_differential_interactions(), we strongly recommend using a high-performance computing (HPC) system on high resolutions (10kb), as the subsampling procedure generates 
+$2N$ additional Hi-C matrices to construct the null distribution, which is later used to test for significance. Ideal results are observed with $N=1000$ subsampling iterations. Refer to our paper supplementary materials for execution time and memory details.
 
-     dcis = DifFracTion.identify_differential_interactions(matrix_A_norm,matrix_B_norm,resolution,method='log2fc', subsample_n=20,log2_fc_cutoff=0,p_value_threshold=0.01,bayesian=False)
+     alpha_padjusted_interactions,n_bins = DifFracTion.identify_differential_interactions(norm_matrix_A, norm_matrix_B, resolution, filter_by='padjusted', pvalue_cutoff,log2fc_cutoff, neighbor_support=True, adjusted_pvalues_method)
+       
+This function takes as input two fully normalized Hi-C contact matrices (matrix\_A\_norm and matrix\_B\_norm) at the same resolution, along with the matrix resolution in base pairs. 
 
-
-This function takes as input two fully normalized Hi-C contact matrices (matrix\_A\_norm and matrix\_B\_norm) at the same resolution, along with the matrix resolution in base pairs. Differential interactions can be quantified using a log2 fold-change or difference based operation (method='log2fc'). 
 
 Interactions are reported if they pass a user-defined log2 fold-change threshold (log2_fc_cutoff) and a significance cutoff (p_value_threshold). 
 
@@ -59,14 +79,9 @@ Output format:
      0	34	249.8892  178.0     0.4893    3400000   0.0  0.0  True
      0	35	218.7481  146.0     0.5832    3500000	0.0  0.0  True
 
-The bayesian flag controls whether a Bayesian framework is used for significance estimation.
-
-When the Bayesian framework is enabled, interactions are filtered based on the maximum a posteriori (MAP) probability rather than the log2 fold-change statistic.
-
-Output format:
-
-     bin1	bin2	count_1	count_2	log2_fc	post_mean_log2fc	post_map_log2fc	distance	p_value	p_value_adj	neighbor_support
-     0	34	249.8892	178.0	0.4893	25312.7513	0.4594	3400000	0.0	0.0	True
-     0	35	218.74814	146.0	0.5832	135823.0750	1.8127	3500000	0.0	0.0	True
 
 The *neighbor_support* column is a boolean flag indicating whether a given interaction has at least one statistically significant neighboring interaction. Although both `True` and `False` values are reported, only interactions with `neighbor_support = True` are retained in the final results.
+
+# Paper results
+
+To replicate any figure included on the paper refer to the corresponding folder and follow the corresponding README instructions.

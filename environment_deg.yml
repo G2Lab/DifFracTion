@@ -1,0 +1,15 @@
+name: diffraction_deg
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - r-base=4.3
+  - r-argparse
+  - bioconductor-deseq2
+  - bioconductor-apeglm
+  - bioconductor-org.hs.eg.db
+  - bioconductor-txdb.hsapiens.ucsc.hg19.knowngene
+  - bioconductor-ensdb.hsapiens.v86
+  - bioconductor-genomicfeatures
+  - r-ashr

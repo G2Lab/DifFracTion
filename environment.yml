@@ -14,3 +14,7 @@ dependencies:
   - pip
   - pip:
     - hic-straw
+    - cooltools
+    - hic2cool
+    - CrossMap
+    - pyBigWig
