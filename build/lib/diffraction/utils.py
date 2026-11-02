@@ -8,889 +8,223 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 from statistics import mean, median
 from scipy.stats import linregress
+import scipy.sparse
 from scipy.sparse import coo_matrix
 import math
 from scipy.stats import norm
 from statsmodels.stats.multitest import multipletests
+from scipy.stats import bootstrap
+
+from scipy.sparse import coo_matrix
+from scipy import ndimage
+from scipy.stats import linregress
+
+import numpy as np
+import pandas as pd
+
+import matplotlib.pyplot as plt
+from matplotlib import colors
+
 
 #### DifFracTion functions ####
 
-permutations_n = 1000
+main_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-## Main function to normalize
-def alpha_normalization(matrixA,matrixB,chromosome_length,resolution,desired_alpha=-1.08,upper_limit=7e6,lower_limit=0,metric='median'):
-	'''
-	Docstring for alpha_normalization
+#  ── Preprocessing - MA related ───────────────────────────────────────────────────────────────
+
+def compute_log2fc(matrix_A,matrix_B,resolution,upper_limit=7e6,lower_limit=5e4):
+	n = matrix_A.shape[0]
+	#Minumum and maximum distances 
+	min_d = int(max(1, lower_limit // resolution)) # minimum distance in bins, avoid main diagonal d=0
+	max_d = int(min(n, upper_limit // resolution))  # don't go beyond the upper limit in bins
+
+	distances_list, log2fc_list, rows_in_list, cols_in_list,IF_list = [], [], [], [], []
+	distances_out_list, log2fc_out_list, rows_out_list, cols_out_list,IF_out_list = [], [], [], [], []
 	
-	:param matrixA: nxn numpy array representing the first contact matrix
-	:param matrixB: nxn numpy array representing the second contact matrix
-	:param chromosome_length: Length of the chromosome in base pairs
-	:param resolution: Bin resolution in base pairs
-	:param desired_alpha: Desired alpha value for normalization
-	:param upper_limit: Upper distance limit for normalization, default is 7e6
-	:param lower_limit: Lower distance limit for normalization, default is 0
-	:param metric: Metric to use for distance decay calculation (e.g., 'median' or 'mean')
-	'''
-
-	matrixA_counts,matrixB_counts=get_counts_by_distance_both_densematrices(matrixA,matrixB,chromosome_length,resolution)
-	d_1, y_1, m_1, b_1, alpha_1 = calculate_distance_decay(matrixA_counts, metric=metric,
-                              lower_limit=lower_limit,upper_limit=upper_limit)
-	d_2, y_2, m_2, b_2, alpha_2 = calculate_distance_decay(matrixB_counts, metric=metric,
-                              lower_limit=lower_limit,upper_limit=upper_limit)
-     																
-
-	scaled_counts_1,scaled_counts_2,full_factors_r,full_factors_s=pre_counts(matrixA_counts,matrixB_counts,d_1,d_2,y_1,y_2,desired_alpha,resolution)
-     
-	#### Apply factors to dense matrices
-	matrixA_adj=apply_dict_factors_to_dense(matrixA,full_factors_r,resolution)
-	matrixB_adj=apply_dict_factors_to_dense(matrixB,full_factors_s,resolution)
-	return matrixA_adj,matrixB_adj
-
-def iterative_normalization(matrixA,matrixB,chromosome_length,resolution,upper_limit=7e6,lower_limit=0,metric='median', verbose=True):
-	matrixA_counts,matrixB_counts=get_counts_by_distance_both_densematrices(matrixA,matrixB,chromosome_length,resolution)
-	matrixB_counts_scaled, best_error, updated_factor = cycle_correction(matrixA_counts, matrixB_counts,metric=metric,
-											error_type='mse',upper_limit=upper_limit,lower_limit=lower_limit)
-	matrixA_counts_scaled=matrixA_counts
-	#### Apply factors to dense matrices
-	matrixA_adj=apply_factors_to_dense(matrixA,1,resolution)
-	matrixB_adj=apply_factors_to_dense(matrixB,updated_factor,resolution)
-	if verbose:
-		print(f"Final scaling factor applied to matrix B: {updated_factor:.4f}")
-		print(f"Final error after iterative normalization: {best_error:.4f}")
-	return matrixA_adj,matrixB_adj
-
-
-
-
-
-
-
-
-#
-### Individual fitting
-def get_individual_factors(y, expected_fit):
-    """
-    Iteratively bring y closer to expected_fit without collapsing into a straight line.
-    Returns: the new y values after the correction with their respective factors
-    """
-    y = np.asarray(y, dtype=float)
-    ef = np.asarray(expected_fit, dtype=float)
-    factors = ef / y
-    average_factor = np.mean(factors)
-    factors = np.append(factors,average_factor)
-    return factors
-
-def apply_factors_to_dict_counts(counts,factors,resolution):
-	upper_limit = 7000000
-	"""
-	Apply factors to counts
-	Args:
-		counts: dict {distance_in_bp: list_of_counts}
-		factors: list of factors per distance and overall average as the last element
-		resolution: bin resolution in base pairs
-	Returns:
-		new_counts: dict {distance_in_bp: list_of_rescaled_counts}
-	"""
-	
-	n_distances = len(counts)
-
-	factors_dict={}
-
-	keys_for_fits = [resolution*(k) if resolution*(k) > 0 else None for k in range(0, (upper_limit//resolution)+1)]
-	keys_for_fits.remove(None)
-	
-	for k,f in zip(keys_for_fits, factors):
-		factors_dict[k]=f
-	for k in counts.keys():
-		if k not in factors_dict:
-			factors_dict[k]=factors[-1]
-
-	new_counts = defaultdict(list)
-
-	for k,d in counts.items():
-		counts_rescaled=(np.array(d, dtype=float) * factors_dict[k]).tolist()
-		new_counts[k] = counts_rescaled
-	
-	return new_counts,factors_dict
-
-def apply_factors_to_dict_counts_v1(counts,factors,resolution):
-	"""
-	Apply factors to counts
-	Args:
-		counts: dict {distance_in_bp: list_of_counts}
-		factors: list of factors per distance and overall average as the last element
-		resolution: bin resolution in base pairs
-	Returns:
-		new_counts: dict {distance_in_bp: list_of_rescaled_counts}
-	"""
-	keys = list(counts.keys())
-	values = list(counts.values())
-	n_distances = len(keys)
-	per_distance = factors[:-1]
-	overall_average = factors[-1]
-
-	full_factors = np.empty(n_distances)
-	full_factors[:len(per_distance)] = per_distance
-	full_factors[len(per_distance):] = overall_average
- 
-	# New version of inferring the unit
-	support_bp= 0
-	support_index = 0
-	for i in range(n_distances):
-		basis = keys[i] % resolution
-		if basis == 0:
-			support_bp += 1
-		elif basis != 0:
-			support_index += 1
-	if support_bp > support_index:
-		unit = 'bp'
-	elif support_index > support_bp:
-		unit = 'index' # it will never be this case because we force the dict to have distances in bp
-	else:
-		unit = 'unknown'
+	for d in range(1, n): # avoid main diagonal
+		diag_A = np.asarray(matrix_A.diagonal(d), dtype=np.float64).ravel()
+		diag_B = np.asarray(matrix_B.diagonal(d), dtype=np.float64).ravel()	
+		valid = (diag_A > 0) & (diag_B > 0)
+		valid = valid.ravel()
+		rows_valid = np.where(valid)[0]
 		
-	new_counts = defaultdict(list)
-	if unit == 'bp':
-		for k,c in counts.items():
-			index = (k // resolution)-1
-			factor = full_factors[index]
-			counts_rescaled = (np.array(c, dtype=float) * factor).tolist()
-			new_counts[k] = counts_rescaled
+		cols_valid = rows_valid + d  # Assuming square matrix
+		if not np.any(valid):
+			continue
 
-	elif unit == 'index':
-		for k,c in counts.items():
-			index = k
-			factor = full_factors[index]
-			counts_rescaled = (np.array(c, dtype=float) * factor).tolist()
-			new_counts[k] = counts_rescaled
+		log2fc = np.log2((diag_A[valid] + 0.01) / (diag_B[valid] + 0.01))
+		mean_IF = (diag_A[valid] + diag_B[valid]) / 2
+		d_bp = d * resolution
+
+		if min_d <= d < max_d:   # within range
+			log2fc_list.append(log2fc)
+			distances_list.append(np.full(log2fc.size, d_bp, dtype=np.float64))
+			IF_list.append(np.full(log2fc.size, mean_IF, dtype=np.float64))
+			rows_in_list.append(rows_valid)
+			cols_in_list.append(cols_valid)
+		else:                    # outside range
+			log2fc_out_list.append(log2fc)
+			distances_out_list.append(np.full(log2fc.size, d_bp, dtype=np.float64))
+			IF_out_list.append(np.full(log2fc.size, mean_IF, dtype=np.float64))
+			rows_out_list.append(rows_valid)
+			cols_out_list.append(cols_valid)
+	obs_rows = np.concatenate(rows_in_list + rows_out_list) if (rows_in_list or rows_out_list) else np.array([])
+	obs_cols = np.concatenate(cols_in_list + cols_out_list) if (cols_in_list or cols_out_list) else np.array([])
+	distances     = np.concatenate(distances_list)
+	log2fc_values = np.concatenate(log2fc_list)
+	distances_out     = np.concatenate(distances_out_list)     if distances_out_list     else np.array([])
+	log2fc_values_out = np.concatenate(log2fc_out_list)        if log2fc_out_list        else np.array([])
+	IF_values         = np.concatenate(IF_list)               if IF_list               else np.array([])
+	IF_values_out     = np.concatenate(IF_out_list)           if IF_out_list           else np.array([])
+
+	return distances, log2fc_values, distances_out, log2fc_values_out, obs_rows, obs_cols, IF_values, IF_values_out
+
+
+def plot_MA(matrix_A: np.ndarray, 
+		  matrix_B: np.ndarray, 
+		  resolution: int, 
+		  log2_fc_cutoff: float, 
+		  upper_limit: float = 7e6, 
+		  lower_limit: float = 5e4, 
+		  xscale: str = 'log', 
+		  bayesian: bool = True):
+	if bayesian:
+		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, Avalues_in, Bvalues_in, Avalues_out, Bvalues_out = compute_log2fc_bayesian(matrix_A, matrix_B, resolution, lower_limit, upper_limit)
 	else:
-		raise ValueError("Could not infer bin unit (bp or index).")
+		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc(matrix_A, matrix_B, resolution, upper_limit, lower_limit)
 
-	return new_counts,full_factors
+	# If there are no points outside the range, we can just plot the points within the range
+	all_distances = np.concatenate([distances, distances_out]) if distances_out.size else distances
+	all_log2fc    = np.concatenate([log2_fc,   log2_fc_out])   if log2_fc_out.size   else log2_fc
+	#all_IF        = np.concatenate([IF_values, IF_values_out]) if IF_values_out.size else IF_values
 
-### Data Preparation 
-def prepare_MatrixZoomData(hic_path,chromosome,resolution,normalization="KR"):
+	#IF_90th_percentile = np.percentile(all_log2fc, 95)
+
+	fig = plt.figure(figsize=(8, 6), dpi=200)
+
+	plt.scatter(all_distances, all_log2fc, alpha=0.5, s=1, 
+		   		c=all_log2fc, cmap='RdYlBu_r')
+	plt.colorbar(label='Log2 Fold Change (Sample A / Sample B)')
+	plt.hlines(0,  xmin=0, xmax=all_distances.max(), colors='red',  linestyles='dashed')
+	plt.hlines( log2_fc_cutoff, xmin=0, xmax=all_distances.max(), colors='gray', linestyles='dashed')
+	plt.hlines(-log2_fc_cutoff, xmin=0, xmax=all_distances.max(), colors='gray', linestyles='dashed')
+	plt.vlines(upper_limit, ymin=all_log2fc.min(), ymax=all_log2fc.max(), colors='red', linestyles='dotted', linewidth=0.5)
+	if lower_limit > 0:
+		plt.vlines(lower_limit, ymin=all_log2fc.min(), ymax=all_log2fc.max(), colors='red', linestyles='dotted', linewidth=0.5)
+	plt.xlabel('Genomic Distance (bp)')
+	if xscale == 'log':
+		plt.xscale('log')
+		plt.xlim(left=all_distances.min(), right=all_distances.max())
+
+	
+	plt.ylabel('Log2 Fold Change (Sample A / Sample B)')
+	return fig
+
+
+
+
+
+
+
+# ── Preprocessing data functions ───────────────────────────────────────────────────────────────
+
+def save_sparse_matrix(hic_path,chromosome,resolution,output_path):
+	'Load from .hic file'
+	mdz = prepare_MatrixZoomData(hic_path,chromosome,resolution)
+	chr_len = get_chromosome_length(hic_path,chromosome)
+
+	n_bins = chr_len //	resolution + 1
+
+	records = mdz.getRecords(0, chr_len,0,chr_len)
+
+	rows,cols,values = [],[],[]
+	for record in records:
+		# Might have to implement if it is on coordinates or bins
+		i,j = record.binX//resolution, record.binY//resolution
+		rows.append(i); cols.append(j); values.append(record.counts)
+	sparse_matrix = scipy.sparse.csr_matrix(
+		(values, (rows, cols)), shape=(n_bins, n_bins)
+	)
+
+	scipy.sparse.save_npz(output_path, sparse_matrix)
+
+def load_sparse_matrix(npz_path):
+	return scipy.sparse.load_npz(npz_path)
+
+def load_dense_matrix(npz_path):
+	sparse_matrix = load_sparse_matrix(npz_path)
+	dense_matrix = np.asarray(sparse_matrix.todense(), dtype=np.float64)
+	return dense_matrix
+
+def get_chromosome_length(hic_path,chromosome):
+	"""
+
+	helper function to get the length of a chromosome from a .hic file
+
+
+	:param hic_path: Local path to the .hic file
+	:param chromosome: Chromosome name (e.g., '1' or 'chr1')
+	"""
+	hic = hicstraw.HiCFile(hic_path)
+	chromosomes = hic.getChromosomes()
+
+	for chrom in chromosomes:
+		if chrom.name == chromosome:
+			return int(chrom.length)
+
+	# Toggle chr prefix and retry
+	alt = chromosome.replace('chr', '') if chromosome.startswith('chr') else f'chr{chromosome}'
+	for chrom in chromosomes:
+		if chrom.name == alt:
+			return int(chrom.length)
+
+	raise ValueError(f"Chromosome {chromosome} not found in the Hi-C file.")
+
+def prepare_MatrixZoomData(hic_path, chromosome, resolution, normalization="KR"):
     """
     Prepare a hicstraw MatrixZoomData object for a given chromosome, resolution, and normalization.
-    
+
     Parameters:
     hic_path (str): Path to the .hic file.
     chromosome (str): Chromosome name (e.g., 'chr1').
     resolution (int): Resolution in base pairs (e.g., 10000 for 10kb).
     normalization (str): Normalization method (default is "KR").
-    
+
     Returns:
     MatrixZoomData: The prepared MatrixZoomData object.
     """
     straw = hicstraw.HiCFile(hic_path)
-    matrix_data = straw.getMatrixZoomData(chromosome, chromosome, "observed", normalization,"BP", resolution)
-    return matrix_data
+    # Resolve the chromosome name used in this file (some files use 'chr1', others '1')
+    chrom_names = {c.name for c in straw.getChromosomes()}
+    alt = chromosome.replace('chr', '') if str(chromosome).startswith('chr') else f'chr{chromosome}'
+    resolved = str(chromosome) if str(chromosome) in chrom_names else alt
+    try:
+        matrix_data = straw.getMatrixZoomData(resolved, resolved, "observed", normalization, "BP", resolution)
+        return matrix_data
+    except:
+        raise ValueError(f"Normalization {normalization} not found in the Hi-C file for chromosome {resolved}.")
 
-def infer_bins_unit(records, resolution, chromosome_length, sample_n=1000):
-    import math
-    """Infer whether the binX values in records are in base pairs (bp) or bin indices.
-    Parameters:
-    records (iterable): An iterable of records with a 'binX' attribute.
-    resolution (int): The resolution in base pairs.
-    chromosome_length (int): The length of the chromosome in base pairs.
-    sample_n (int): Number of records to sample for inference (default is 1000)."""
-    
-    support_bp= 0
-    support_index = 0
-    xs = [r.binX for r in records[:sample_n]] if hasattr(records, '__getitem__') else []
-    if not xs:
-        for k, r in zip(range(sample_n), records):
-            xs.append(r.binX)
-    for x in xs:
-        basis = x % resolution
-
-        if basis == 0:
-            support_bp += 1
-        elif basis != 0:
-            support_index += 1
-    if support_bp > support_index:
-        return 'bp'
-    elif support_index > support_bp:
-        return 'index'	
-    else:
-    	return 'unknown'
- 
-def get_counts_by_distance_from_matrixZoom(matrix,chromosome_length,resolution):
-	'''Get contact counts grouped by genomic distance from a MatrixZoomData object.
-	Args: 
-		matrix: MatrixZoomData object from hicstraw
-		resolution: resolution in base pairs
-		chromosome_length: length of the chromosome in base pairs
-	Returns:
-		counts: dict with distances as keys and list of counts as values
-	'''
-	recs = matrix.getRecords(0, chromosome_length, 0, chromosome_length) 
-	unit = infer_bins_unit(recs, resolution, chromosome_length)
-	counts = defaultdict(list)
-	for r in recs:
-		d_bins = abs(r.binX - r.binY)
-		if d_bins == 0:
-			continue  # Skip diagonal
-		if unit == 'bp':
-			d_bp = d_bins
-		elif unit == 'index':
-			d_bp = d_bins * resolution
-		else:
-			raise ValueError("Could not infer bin unit (bp or index).")
-		if r.counts > 0:
-			counts[d_bp].append(r.counts)
-	return counts  
-
-def get_counts_by_distance_from_dense(matrix, resolution):
-    """
-    Get contact counts grouped by genomic distance from a dense Hi-C matrix.
-
-    Args:
-        matrix: 2D numpy array (square contact matrix)
-        resolution: bin resolution in base pairs
-
-    Returns:
-        counts: dict {distance_in_bp: list_of_counts}
-    """
-    n_bins = matrix.shape[0]
-    counts = defaultdict(list)
-	# It will always be index because we are passing a dense matrix and we are iterating over n_bins range
-    for i in range(n_bins):
-        for j in range(i+1, n_bins):   # skip diagonal, only upper triangle WE NEVER INCLUDE 0
-            d_bins = j - i
-
-            d_bp = d_bins * resolution
-            val = matrix[i, j]
-            if val > 0:
-                counts[d_bp].append(val)
-
-    return counts
-
-def get_shared_distances(counts_1,counts_2):
-	'''Get shared distances between two counts dictionaries.
-	Args:
-		counts_1: dict with distances as keys and list of counts as values
-		counts_2: dict with distances as keys and list of counts as values'''
-	shared_keys = set(counts_1.keys()).intersection(set(counts_2.keys()))
-	counts_1 = {k: counts_1[k] for k in shared_keys}
-	counts_2 = {k: counts_2[k] for k in shared_keys}
-	counts_1 = dict(sorted(counts_1.items()))
-	counts_2 = dict(sorted(counts_2.items()))
-	return counts_1, counts_2
-
-def get_counts_by_distance_both_matricesZoom(matrix_1,matrix_2,chromosome_length,resolution):
-	counts_1 = get_counts_by_distance_from_matrixZoom(matrix_1,chromosome_length,resolution)
-	counts_2 = get_counts_by_distance_from_matrixZoom(matrix_2,chromosome_length,resolution)
-	counts_1, counts_2 = get_shared_distances(counts_1,counts_2)
-	return counts_1, counts_2
-
-def get_counts_by_distance_both_densematrices(matrix_1,matrix_2,chromosome_length,resolution):
-	counts_1 = get_counts_by_distance_from_dense(matrix_1,resolution)
-	counts_2 = get_counts_by_distance_from_dense(matrix_2,resolution)
-	counts_1, counts_2 = get_shared_distances(counts_1,counts_2)
-	return counts_1, counts_2
-
-def rawMatrix(matrix,chromosome_length):
-	'''Get the raw contact matrix from a MatrixZoomData object.
-	Args:
-		matrix: MatrixZoomData object from hicstraw
-		chromosome_length: length of the chromosome in base pairs
-	Returns:
-		raw_matrix: contact matrix as a 2D numpy array getRecordsAsMatrix
-	'''
-	raw_matrix = matrix.getRecordsAsMatrix(0,chromosome_length,0,chromosome_length)
-	return raw_matrix
-
-
-### Prepare matrix to remove distances outside limits
-def filter_matrix_by_distance(matrix,resolution,upper_limit,lower_limit):
-    '''
-    Set to zero the contacts in the matrix that are outside the specified distance limits.
-    Args:
-	   matrix: 2D numpy array (square contact matrix)
-	   resolution: bin resolution in base pairs
-	   upper_limit: upper distance limit in base pairs
-	   lower_limit: lower distance limit in base pairs
-	Returns:
-		filtered_matrix: 2D numpy array with contacts outside the distance limits set to zero
-    '''
-    n_bins = matrix.shape[0]
-    filtered_matrix = matrix.copy()
-    for i in range(n_bins):
-        for j in range(n_bins):
-            d_bins = abs(j - i)
-            d_bp = d_bins * resolution
-            if d_bp > upper_limit or d_bp < lower_limit:
-                filtered_matrix[i, j] = 0
-    return filtered_matrix
-
-### Decay Fitting
-def extract_metric_decay(counts,metric='mean'):
-	'''Get decay data (mean per distance) from counts dictionary.
-	Args:
- 		counts: dict with distances as keys and list of counts as values
-		metric: 'mean' or 'median' (default is 'mean')	
-	Returns:
-		decay_dict: dict with distances as keys and mean/median counts as values (one value per key)
-    '''
-	if metric == 'median':
-		decay_dict = {d: median(c) for d, c in counts.items()}
-	elif metric == 'mean':
-		decay_dict = {d: mean(c) for d, c in counts.items()}
-	return decay_dict
-
-def calculate_distance_decay(counts,metric='mean',upper_limit=7e6,lower_limit=5e5,verbose=False):
-	'''Calculate distance decay and fit a power-law model.
-	Args:
-		counts: dict with distances as keys and list of counts as values
-		metric: 'mean' or 'median' (default is 'mean')
-		upper_limit: upper distance limit for fitting (default is 7e6)
-		lower_limit: lower distance limit for fitting (default is 5e5)
-		verbose: if True, print alpha and intercept (default is False) 
-	Returns:
-		d: list of distances used in fitting
-		c: list of mean/median counts used in fitting
-		m: slope of the fitted line in log-log space
-		b: intercept of the fitted line in log-log space
-		alpha: exponent of the power-law decay (alpha = -m)
-    '''
-	
-	decay_dict = extract_metric_decay(counts,metric)
-
-	#Filter by distance, only the distances that are involved in the fitting
-	decay_filtered={d: c for d,c in decay_dict.items() if d <= upper_limit and d >= lower_limit}
-	d = list(decay_filtered.keys())
-	c = list(decay_filtered.values())
-	#Flag
-	logx, logy = np.log(d), np.log(c)
-	regression = linregress(logx, logy) #log-log regression
-	m,b = regression.slope, regression.intercept
-	alpha = -m
-	if verbose:
-		print(f"α = {alpha:.2f}, intercept = {b:.2f}")
-	return d,c,m,b,alpha
-
-def refit_intercept(y, d, m):
-	
-	"""
-	We need to refit the b because the previous one was based on a given slope
-	Fit intercept b given a fixed slope m.
-	y: observed counts (log10 scale)
-	d: distances (log10 scale)
-	"""
-	#Flag
-	logy = np.log(y)
-	logd = np.log(d)
-	b = np.mean(logy - m*logd)
-	return b
-
-def linear_distance_decay(b, m, distances):
-	'''Based on the fitted parameters, get the expected counts at given distances.
-	Args:
-		b: intercept of the fitted line in log-log space
-		m: slope of the fitted line in log-log space
-		distances: list of distances to calculate expected counts for
-	Returns:
-		expected_counts: list of expected counts at the given distances
-	'''
-	#Flag 
-	d = np.asarray(distances, dtype=float)
-	linear_fit = np.exp(b + m*np.log(d))
-	return linear_fit
-
-### Correction
-def cycle_correction(ref_counts, scaled_counts,metric='median',error_type='mse',upper_limit=7e6,lower_limit=0,verbose=False):
-	best_error    = float("inf")
-	max_cycles=20
-	tol=1e-6
-	w_factor=1.08
-	updated_factor=1.0
-	for cycle in range(max_cycles):
-		if verbose:
-			print(f"\nCycle {cycle+1}")
-		
-		improved = False
-		set_usable_distances = {d: c for d,c in ref_counts.items() if d <= upper_limit } # Just the set of distances that are actually used for decay
-		distances=list(range(1,len(set_usable_distances.keys())))
-		for i in distances:
-			trial_scaled, error,factor = correction(ref_counts, scaled_counts, i-1,upper_limit=upper_limit,
-											lower_limit=lower_limit,metric=metric,error_type=error_type,
-            									weight_factor=-1*w_factor,plot=False)
-			if error + tol < best_error:
-				scaled_counts = trial_scaled
-				best_error = error
-				updated_factor *= factor  # accumulate factor
-				if verbose:
-					print(f"    Error: {error:.4f}")
-					print("     New best error, updating counts")
-				improved = True
-			else:
-				if verbose:
-					print("")			
-		#If at least one of the distances make an improvement, then improved=True
-		if not improved: #if none of the distances made an improvement then we stop
-			break
-	return scaled_counts, best_error, updated_factor
-
-def correction(ref_counts, counts_to_scale, i,
-                         lower_limit=5e5,upper_limit=7e6,
-                         metric='mean',error_type='mse',weight_factor=-1.08,
-                         plot=False,verbose=False):
-	do_weights = True
- 
-	# Decays. Metric has to be consistent with the one used on previous steps
-	decay_ref = extract_metric_decay(ref_counts, metric=metric)
-	decay_2   = extract_metric_decay(counts_to_scale, metric=metric)
-
-	# Values at distances
-	y_1 = list(decay_ref.values())
-	y_2 = list(decay_2.values())
-    
-	distances = np.array(list(decay_ref.keys()))
-	ratios = np.array(y_1) / np.array(y_2)
-    
-
-    
-    # The logic here is to scale the counts at distance i by a factor 
-    # that is a weighted average of the ratios at all distances,
-    # with weights decreasing with distance
-
-	if do_weights:
-		weights = distances ** weight_factor # weights decrease with distance
- 
-	# normalize weights
-	# normalizing by the maximum just rescales the whole array 
-  	# to be between 0 and 1, ratios are intact
-     
-		weights = weights / weights.max() # normalizing one weight at the time,
-		raw_factor = ratios[i] * weights[i]
-  
+     	
+# ────── Synthetic datasets functions ────────────────────────────────────────────────────────────────	
+# Synthetic data generation
+def synthetic_datasets(matrix, ds_factor):
+	"""downsampling method
+	ds_factor = downsampling factor, e.g. 0.5 means half the reads"""
+	if ds_factor == 1:
+		return matrix.copy()
 	else:
-      
-		raw_factor = ratios[i]
-
-	# Smooth the factor a bit, 0.2 means 20% of the way from 1 to raw_factor
-	# so if raw_factor is 2, the final factor will be 1.2
-	#Think of η as how aggressively you steer a car back into the lane:	
-	# (raw_factor - 1)is the correction away from 1, if raw factor is 2 then 2 - 1 = 1
-	# eta * (raw_factor - 1) is the fraction of that correction we apply
+		n_reads = get_reads_count(matrix) * ds_factor
+		tag_mat= dense2tag(matrix) #tag_len is the number of non-zero elements in the matrix
+		sample_idx = np.random.choice(len(tag_mat), int(n_reads)) #from tag len randomly select n_reads number of items
+		sample_tag = tag_mat[sample_idx]# getting coordinates from the coo matrix of the selected items
+		down_mat = tag2dense(sample_tag, matrix.shape[0])
+		down_mat = np.matrix(down_mat) # convert to numpy matrix
+		return down_mat
 	
-	eta = 0.15
-	factor = 1 + eta * (raw_factor - 1)
-
-	if verbose:
-		print("Scale factor at distance index", i, ":", factor)
-	scaled_counts = defaultdict(list)
-	
-	#Populate the scaled counts, all distances values are scaled by the same factor
-	#We apply the same factor because the HiC Matrix is a whole polymer and changing one distance only is not possible
-	for d, c in counts_to_scale.items(): 
-		arr = np.array(c, dtype=float)
-		scaled_counts[d] = (arr * factor).tolist()
-	
-	#0 to upper limit fitting
-	d_r, y_r, m_r, b_r, alpha_r = calculate_distance_decay(ref_counts,lower_limit=lower_limit,upper_limit=upper_limit)
-	d_s, y_s, m_s, b_s, alpha_s = calculate_distance_decay(scaled_counts,lower_limit=lower_limit,upper_limit=upper_limit)
-
-	#Each iteration
-	if plot:
-		decay_boxPlot(d_r, ref_counts, m_r, b_r,
-					d_s, scaled_counts, m_s, b_s)
-     
-	decay_ref_fit    = linear_distance_decay(b_r, m_r, d_r)
-	decay_scaled_fit = linear_distance_decay(b_s, m_s, d_s)
-
-	error = measure_error_by_distance(decay_scaled_fit, decay_ref_fit, method=error_type)
-	
-	return scaled_counts, error,factor
-
-def measure_error_by_distance(y_obs,y_exp,method='mse'):
-	#Error is measured after fitting the distance decay
-	# Now we want to decide which correction wins
-	# if we weight shorter distances more then:
-	     # when short distances get closer the weighter error will drop even if the large distances diverge
-	     # When only large distances improve, the weighted error barely moves 
-    
-	y_obs=np.asarray(y_obs, dtype=float)
-	y_exp=np.asarray(y_exp, dtype=float)
-	mask = (y_obs > 0) & (y_exp > 0)
-    
-	# They are obviously in order thats why we can use the relation
-	distances = np.arange(1,len(y_obs)+1)    
-	distances = np.asarray(distances)[mask]
-	if method == 'mse':
-		se=((np.log(y_obs[mask])-np.log(y_exp[mask]))**2)
-		weights = distances ** -1.08
-		# weighted average across all distances, all weights sum to 1
-		# if we were to normalize by max, we would be scaling the whole error
-		#That’s why you normalize by the sum, so the weights behave like probabilities.
-		weights = weights / weights.sum()
-		mse = np.average(se, weights=weights)
-		return mse
-	elif method == 'mae':
-		ae = np.abs(np.log(y_obs[mask]) - np.log(y_exp[mask]))
-		weights = distances ** -1.08
-		weights = weights / weights.sum()
-		mae = np.average(ae, weights=weights)
-		return mae
-
-### Apply factors
-def apply_factors_to_records(matrix,resolution, chromosome_length,factor):
-     
-    '''
-    Apply a scaling factor to all counts in a MatrixZoomData object and return adjusted records.
-    Args: 
-    matrix: a matrix in the form getMatrixZoomData from hic-straw
-    resolution: resolution of the matrix
-    chromosome_length: length of the chromosome
-    factor: final factor to be applied to all counts
-    Returns:
-    adjusted_records: list of tuples (i,j,adjusted_count)
-    '''
-    # Get all records
-    records = matrix.getRecords(0, chromosome_length, 0, chromosome_length)
-    basis = infer_bins_unit(records, resolution, chromosome_length)
-        
-    adjusted_records = []
-    for r in records:
-        if basis == 'bp':
-            format_bins = abs(r.binX - r.binY)
-        elif basis == 'index':
-            format_bins = abs(r.binX - r.binY) * resolution
-        r.counts = r.counts * factor
-        adjusted_records.append((r.binX, r.binY, r.counts))
-        adjusted_records.append((r.binY, r.binX, r.counts))
-    return adjusted_records, basis
-
-def records_to_coomatrix(adj_records,basis,chromosome_length,resolution):
-    '''
-    	Arguments: 
-     adj_records: list of tuples (i,j,adjusted_count)'
-     chromosome_length: length of the chromosome
-     resolution: resolution of the matrix
-     Returns:
-     sparse matrix in coo format
-    '''
-    num_bins = math.ceil(chromosome_length / resolution)
-    rows, cols, data = [], [], []
-    for i,j,val in adj_records:
-        if basis == 'bp':
-            i = i // resolution
-            j = j // resolution
-        elif basis == 'index':
-            i = i
-            j = j
-        rows.append(i)
-        cols.append(j)
-        data.append(val)
-    sparse_matrix = coo_matrix((data, (rows, cols)), shape=(num_bins, num_bins))
-    return sparse_matrix
-  
-def coo2dense(coo_matrix):
-    dense_matrix = coo_matrix.toarray()  
-    return dense_matrix      
-
-def get_corrected_matrix(matrix,resolution,chromosome_length,factor):
-    '''
-    Apply a scaling factor to all counts in a MatrixZoomData object and return the corrected dense matrix.
-    Args:
-    matrix: a matrix in the form getMatrixZoomData from hic-straw
-    resolution: resolution of the matrix
-    chromosome_length: length of the chromosome
-    factor: final factor to be applied to all counts
-    Returns:
-    dense_matrix: corrected contact matrix as a 2D numpy array
-    '''
-    adjusted_records, basis = apply_factors_to_records(matrix,resolution, chromosome_length,factor)
-    coo_matrix = records_to_coomatrix(adjusted_records,basis,chromosome_length,resolution)	
-    dense_matrix = coo2dense(coo_matrix)
-    dense_matrix = np.triu(dense_matrix,k=1)  # Keep only upper triangle
-    return dense_matrix
-
-
-def apply_factors_to_dense(matrix, factor,resolution ):
-    """
-	Apply factors to a dense Hi-C matrix.
-	Args:
-		matrix: 2D numpy array (triangular contact matrix)
-		resolution: bin resolution in base pairs
-    """
-    new_matrix = matrix.copy()  # <- make a copy so original is untouched
-    n_bins = matrix.shape[0]
-	# It will always be index because we are passing a dense matrix and we are iterating over n_bins range
-    for i in range(n_bins):
-        for j in range(i+1, n_bins):   # skip diagonal, only upper triangle
-            new_matrix[i, j] = matrix[i, j] * factor
-    return np.triu(new_matrix)
-
-def apply_list_factors_to_dense(matrix, list_factor,resolution ):
-	"""
-	Apply factors to a dense Hi-C matrix.
-	Args:
-		matrix: 2D numpy array (triangular contact matrix)
-		resolution: bin resolution in base pairs
-	"""
-	new_matrix = matrix.copy()  # <- make a copy so original is untouched
-
-	n_bins = matrix.shape[0]
-	max_index = len(list_factor) - 1 
-	# It will always be index because we are passing a dense matrix and we are iterating over n_bins range
-	for i in range(n_bins):
-		for j in range(i+1, n_bins):   # skip diagonal, only upper triangle
-			index = np.abs(j - i) - 1
-			if index > max_index:
-				factor = list_factor[-1]
-			else:
-				factor = list_factor[index]
-			new_matrix[i, j] = matrix[i, j] * factor
-
-	return np.triu(new_matrix)
-
-def apply_dict_factors_to_dense(matrix, dict_factor,resolution ):
-	"""
-	Apply factors to a dense Hi-C matrix.
-	Args:
-		matrix: 2D numpy array (triangular contact matrix)
-		resolution: bin resolution in base pairs
-	"""
-	new_matrix = matrix.copy()  # <- make a copy so original is untouched
-
-	n_bins = matrix.shape[0]
-	max_key = max(dict_factor.keys())
-	# It will always be index because we are passing a dense matrix and we are iterating over n_bins range
-	for i in range(n_bins):
-		for j in range(i+1, n_bins):   # skip diagonal, only upper triangle
-			index = np.abs(j - i) * resolution
-			if index > max_key or (index not in dict_factor):
-				factor = dict_factor[max_key]
-				
-			else:
-				factor = dict_factor[index]
-	
-			new_matrix[i, j] = matrix[i, j] * factor
-
-	return np.triu(new_matrix)
-### Plots
-
-def decay_boxPlot(distances1, counts_1, m1, b1,
-               distances2, counts_2, m2, b2,upper_limit=7e6):
-    
-	'''Plot distance decay boxplots for two datasets with fitted lines.
-	Args:
- 	distances1/distances2: list of distances used in fitting for dataset 1/2
-  	counts_1/counts_2: dict with distances as keys and list of counts as values for dataset 1/2 (all distances)
-  	m1/m2: slope of the fitted line in log-log space for dataset 1/2
-  	b1/b2: intercept of the fitted line in log-log space for dataset 1/2
-  	upper_limit: upper distance limit for fitting (default is 7e6)
-	Returns:
-		None (displays the plot)
-
-	'''
-	fit_y = linear_distance_decay(b1, m1, distances1) #Line
-	fit_y2 = linear_distance_decay(b2, m2, distances2) 
-
-	keys_1 = list(counts_1.keys())
- 
-	values_1 = list(counts_1.values())
-	values_2 = [counts_2[k] for k in keys_1]
- 
-	width = 0.04 * np.array(keys_1)
-	shift = width / 2
- 
-	fig = plt.figure(figsize=(10,5), dpi=240)
-
-	#Yellow
-	plt.boxplot(
-		values_1,
-		positions=np.array(keys_1) - shift,   
-		widths=width,
-		showfliers=False,
-		patch_artist=True,
-  		boxprops=dict(facecolor="#F2A3A3", color="#C94C4C", linewidth=0.5),
-   		whiskerprops=dict(color="#C94C4C", linewidth=0.5),
-    		capprops=dict(color="#C94C4C", linewidth=0.5),
-    		medianprops=dict(color="#7A0A0A", linewidth=0.8)
-		)
- 
-	plt.plot(distances1, fit_y, color='#492E00', label=f'Dataset A | α={-m1:.2f}', linewidth=0.5)
- 
-	#Teal
-	plt.boxplot(
-		values_2,
-		positions=np.array(keys_1) + shift,   # shift right
-		widths=width,
-		showfliers=False,
-		patch_artist=True,
-		boxprops=dict(facecolor="#D6D8DB", color="#8A8D91", linewidth=0.5),
-		whiskerprops=dict(color="#8A8D91", linewidth=0.5),
-		capprops=dict(color="#8A8D91", linewidth=0.5),
-		medianprops=dict(color="#4A4C4E", linewidth=0.8)
-		)
-		
-	plt.plot(distances2, fit_y2, color='#536562', label=f'Dataset B | α={-m2:.2f}',linewidth=0.5)
-	
- 
-	# Dinamically add y-axis vline
-	# two mins and two maxs, because we are getting the min of each list but then we need the general min
-	ymin = min(min(min(values_1)),min(min(values_2)))
-	ymax = max(max(max(values_1)),max(max(values_2)))
-
- 
-	plt.vlines(upper_limit, ymin=ymin, ymax=ymax, 
-            colors='grey', linestyles='dotted', linewidth=0.5)
- 
-	ax = plt.gca()
-	ax.spines['top'].set_visible(False)
-	ax.spines['right'].set_visible(False)
- 
-	plt.xscale('log')
-	plt.yscale('log')
-	plt.xlabel('Genomic distance (bp)')
-	plt.ylabel('Interaction Frequency')
-	plt.legend().remove()
-	plt.tight_layout()
-	plt.grid(True, which="both", ls="--", linewidth=0.5, alpha=0.3)
-	plt.show()
-	return fig
-
-def plot_both_matrices(raw_matrix1,raw_matrix2):
-	fig, axes = plt.subplots(1, 3, figsize=(12, 5),dpi=250)
-	#Generate full matrix
-	raw_matrix1 = raw_matrix1 + raw_matrix1.T
-	raw_matrix2 = raw_matrix2 + raw_matrix2.T
-	im1 = axes[0].imshow(raw_matrix1, cmap="OrRd", 
-                    vmin=0, vmax=np.percentile(raw_matrix1, 97))
-	axes[0].set_title("Sample A")
-	plt.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
-
-	im2 = axes[1].imshow(raw_matrix2, cmap="OrRd", 
-                    vmin=0, vmax=np.percentile(raw_matrix2, 97))
- 
-	axes[1].set_title("Sample B")
-	plt.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
-
-	diff = np.array(raw_matrix1) - np.array(raw_matrix2)
-	vmax = np.percentile(diff, 99)  
-
-	im3 = axes[2].imshow(diff, cmap="binary", vmin=0, vmax=vmax)
-	axes[2].set_title("Absolute difference (Sample A - Sample B)")
-	plt.colorbar(im3, ax=axes[2], fraction=0.046, pad=0.04)
-
-	plt.tight_layout()
-	plt.show()
-
-def plot_individual_matrix(matrix):
-	plt.figure(figsize=(3,3), dpi=250)
-	plt.imshow(matrix, cmap='RdYlBu_r',vmin=0,vmax=np.percentile(matrix, 99))
-	plt.colorbar(fraction=0.046, pad=0.04)
-	plt.show()
-
-
-### Visualization 
-def matrix2df(matrix):
-	'''Args:
-	matrix: 2D numpy array resultant from getRecordsAsMatrix 
-	Returns:
-	DataFrame with three columns: bin1, bin2, count'''
-	matrix = np.triu(matrix,k=1)  # Keep only upper triangle
-	df = pd.DataFrame([(i, j, matrix[i, j]) for i in range(matrix.shape[0]) for j in range(i+1,matrix.shape[1])])
-	return df
-
-def matrix2longdf(matrix,resolution=None):
-	'''Args:
-	matrix: 2D numpy array resultant from getRecordsAsMatrix 
-	Returns:
-	DataFrame with five columns: start1, end1, start2, end2, count [0,1,2,3,4]'''
-	if resolution is None:
-		resolution = 1
-
-	matrix = np.triu(matrix,k=1)
-	df = pd.DataFrame([(i * resolution, (i + 1) * resolution, j * resolution, (j + 1) * resolution, matrix[i, j]) for i in range(matrix.shape[0]) for j in range(i+1,matrix.shape[0]) ])
-	return df
-
-def merge_matrices_df_log2fc(df1,df2,resolution):
-	'''Merge two contact count DataFrames and calculate distance and log2 fold-change.
-		Args:
-	 		df1: DataFrame with columns ['0', '1', '2'] for dataset 1
-			df2: DataFrame with columns ['0', '1', '2'] for dataset 2
-   			resolution: resolution in base pairs	
-	Returns:
-		both_df: DataFrame with columns ['bin1', 'bin2', 'count_1', 'count_2', 'distance', 'log2_fc']
-	'''
-	both_df = pd.merge(df1, df2, on=[0, 1], suffixes=('_1', '_2'))
-	both_df.columns = ['bin1', 'bin2', 'count_1', 'count_2']
- 
-	both_df['distance'] = resolution * (np.abs(both_df['bin1'] - both_df['bin2']))
-	both_df['log2_fc'] = np.log2((both_df['count_1'] + 0.01) / (both_df['count_2'] + 0.01))
-	return both_df
-
-def merge_matrices_df_difference(df1,df2,resolution):
-	'''Merge two contact count DataFrames and calculate distance and log2 fold-change.
-		Args:
-	 		df1: DataFrame with columns ['0', '1', '2'] for dataset 1
-			df2: DataFrame with columns ['0', '1', '2'] for dataset 2
-   			resolution: resolution in base pairs	
-	Returns:
-		both_df: DataFrame with columns ['bin1', 'bin2', 'count_1', 'count_2', 'distance', 'log2_fc']
-	'''
-	both_df = pd.merge(df1, df2, on=[0, 1], suffixes=('_1', '_2'))
-	both_df.columns = ['bin1', 'bin2', 'count_1', 'count_2']
- 
-	both_df['distance'] = resolution * (np.abs(both_df['bin1'] - both_df['bin2']))
-	both_df['diff'] = (both_df['count_1'] + 1) - (both_df['count_2'] +1)
-	return both_df
-
-def define_plot(merged_df,log2_fc_cutoff,upper_limit):
-	lg2fc_cutoff_pos = log2_fc_cutoff
-	lg2fc_cutoff_neg = -log2_fc_cutoff
-	both_df = merged_df.copy()
-	'''Plot a MA plot comparing a processed merged DataFrame.
-	'''
-	fig = plt.figure(figsize=(8, 6), dpi=200)
-	plt.scatter(both_df['distance'], both_df['log2_fc'], alpha=0.5, s=1, color='black')
-	plt.hlines(0, xmin=0, xmax=both_df['distance'].max(), colors='red', linestyles='dashed')
-	plt.hlines(lg2fc_cutoff_pos, xmin=0, xmax=both_df['distance'].max(), colors='gray', linestyles='dashed')
-	plt.hlines(lg2fc_cutoff_neg, xmin=0, xmax=both_df['distance'].max(), colors='gray', linestyles='dashed')
-	
-	plt.vlines(upper_limit, ymin=both_df['log2_fc'].min(), ymax=both_df['log2_fc'].max(),
-		  colors='red', linestyles='dotted', linewidth=0.5)
-	ax = plt.gca()
-	ax.spines['top'].set_visible(False)
-	ax.spines['right'].set_visible(False)
-	
- 
-	plt.xlabel('Genomic Distance (bp)')
-	plt.xscale('log') #the values stay the same but the axis is log scaled
-	#The tick marks are ploted on an equal visual distance
-	plt.ylabel('Log2 Fold Change (Sample A / Sample B)')
-	return fig
-
-def plot_MA(matrix1,matrix2,resolution,log2_fc_cutoff,upper_limit=7e6):
-	'''Plot a MA plot comparing two contact matrices.
-	Args:
-	matrix1: 2D numpy array resultant from getRecordsAsMatrix for dataset 1
-	matrix2: 2D numpy array resultant from getRecordsAsMatrix for dataset 2
-	resolution: resolution in base pairs
-	log2_fc_cutoff: log2 fold-change cutoff for highlighting significant changes'''
-	df1 = matrix2df(matrix1)
-	df2 = matrix2df(matrix2)
-	merged_df = merge_matrices_df_log2fc(df1,df2,resolution)
-	fig = define_plot(merged_df,log2_fc_cutoff,upper_limit)
-	plt.tight_layout()
-	return fig
-
-
-### Statistical Significance
-#This won't work becayse HiC maps arent independent, nearby bins share signal due domain continuity.
-# If we only randomize each diagonal, we are removing this correlation and increase variance per bin, making the background uniform and not correlated with noise 
-
-
-
-def create_background_matrix(matrix1,matrix2):
-	'''Generate a background matrix by adding two contact matrices.'''
-	background_matrix = (matrix1 + matrix2)
-	return background_matrix
-
+def get_reads_count(matrix):
+	'''Get the total number of reads (upper triangle) in a contact matrix.'''
+	total_reads = int(np.sum(np.triu(matrix, k=0)))
+	return total_reads
 
 def dense2tag(matrix):
     """Convert dense square matrix to COO-based tag matrix (row, col per count)."""
@@ -903,7 +237,6 @@ def dense2tag(matrix):
     tag_mat = np.column_stack((np.repeat(row, data), np.repeat(col, data)))
     return tag_mat
 
-
 def tag2dense(tag, nsize):
     """Convert tag matrix (row, col repeated) back to dense symmetric square matrix."""
     row, col = tag[:, 0], tag[:, 1]
@@ -915,222 +248,1092 @@ def tag2dense(tag, nsize):
     return dense_mat
 
 def matrix_downsampling(matrix, n_reads):
-	"""downsampling method"""
+	"""From an initial matrix, downsample n_reads and return the downsampled matrix with the same distribution of reads."""
 	tag_mat= dense2tag(matrix) #tag_len is the number of non-zero elements in the matrix
 	sample_idx = np.random.choice(len(tag_mat), int(n_reads)) #from tag len randomly select n_reads number of items
 	sample_tag = tag_mat[sample_idx]# getting coordinates from the coo matrix of the selected items
 	down_mat = tag2dense(sample_tag, matrix.shape[0])
+	down_mat = np.matrix(down_mat)
 	return down_mat
 
-def get_reads_count(matrix):
-	'''Get the total number of reads (upper triangle) in a contact matrix.'''
-	total_reads = int(np.sum(np.triu(matrix, k=1)))
-	return total_reads
 
-def perform_permutation_test(matrix1, matrix2, resolution,method='log2fc', permutations_n=1000):
-	df_obs1 = matrix2df(matrix1)
-	df_obs2 = matrix2df(matrix2)
-	if method == 'log2fc':
-		merged_obs_df = merge_matrices_df_log2fc(df_obs1, df_obs2, resolution=resolution)
-	elif method == 'difference':
-		merged_obs_df = merge_matrices_df_difference(df_obs1, df_obs2, resolution=resolution)
-	background_matrix = create_background_matrix(matrix1, matrix2)
-	n_reads1 = get_reads_count(matrix1)
-	n_reads2 = get_reads_count(matrix2)
-	all_perms = merged_obs_df.copy()
+# ── Alpha Normalization functions ──────────────────────────────────────────────────────────────
+def _CI_bootstrap(data, n_resamples=100, confidence_level=0.95):
+	'''Calculate the confidence interval for the median of the data using bootstrap resampling.
+	:param data: 1D array of data points
+	:param n_resamples: number of bootstrap resamples. Default is 500
+	:param confidence_level: confidence level for the interval. Default is 0.95 
+	'''
+	data = data[data > 0]  # Filter out non-positive or zero values
+	R = bootstrap((data,), np.median, confidence_level=confidence_level, n_resamples=n_resamples, method='percentile')
+
+	return R
+
+def _calculate_cutoffs(matrix_A: np.ndarray, matrix_B: np.ndarray, 
+				   resolution: int,upper_limit: float = 7e6, confidence_level: float = 0.95):
+	'''Calculate cutoffs for matrices A and B based on the upper limit. It uses a confidence interval bootstraping technique
+	which allow us to get a robust estimate of the median of the counts outside the distance decay, therefore allowing us
+	to set up a "noise" cutoff.
+	Args:
+	:param matrix_A: dense matrix A
+	:param matrix_B: dense matrix B
+	:param resolution: resolution of the matrices
+	:param upper_limit: upper limit for the distance
+	'''
+	n=matrix_A.shape[0]
+
+	min_d = int(min(n, upper_limit // resolution)) # because we want to get the bins outside the distance decay range
+	max_d = int(max(n, upper_limit // resolution)) # because we want to get the bins outside the distance decay range
+	out_A, out_B = [], []
+	
+	# Get all counts outside the distance decay range (overdispersion)
+	for d in range(min_d, max_d):
+		diag_A = np.asarray(matrix_A.diagonal(d), dtype=np.float64).ravel()
+		diag_B = np.asarray(matrix_B.diagonal(d), dtype=np.float64).ravel()
+		out_A.append(diag_A)
+		out_B.append(diag_B)
+
+
+	out_A = np.concatenate(out_A)
+	out_B = np.concatenate(out_B)
+
+	# We have each matrix out of distance points, we calculate a CI
+	# Calculate CI
+	R_A = _CI_bootstrap(out_A[out_A > 0],confidence_level=confidence_level)
+	R_B = _CI_bootstrap(out_B[out_B > 0],confidence_level=confidence_level)
+
+	cutoff_A = R_A.confidence_interval.high if R_A.confidence_interval.high > 0 else 0
+	cutoff_B = R_B.confidence_interval.high if R_B.confidence_interval.high > 0 else 0
+
+	return cutoff_A, cutoff_B
+
+def get_distances_and_counts_paired(matrix_A: np.ndarray, matrix_B: np.ndarray, resolution: int,
+                                     upper_limit: float = 7e6, lower_limit: float = 5e4, filter: bool = True
+                                     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    
+    if filter:
+        cutoff_A, cutoff_B = _calculate_cutoffs(matrix_A, matrix_B, 
+									   resolution, upper_limit, confidence_level=0.95)
+    else:
+        cutoff_A, cutoff_B = 0, 0
+
+    n = matrix_A.shape[0]
+
+    min_d = int(max(1, lower_limit // resolution))
+    max_d = int(min(n, upper_limit // resolution))
+
+    # Everything inside the range but that also has counts above the cutoff for both matrices
+    # This is just for modeling the distance decay, we havent removed any bins yet
+    distances_list, counts_A, counts_B = [], [], []
+    for d in range(min_d, max_d):
+        diag_A = np.asarray(matrix_A.diagonal(d), dtype=np.float64).ravel()
+        diag_B = np.asarray(matrix_B.diagonal(d), dtype=np.float64).ravel()
+
+        valid = (diag_A >= cutoff_A) & (diag_B >= cutoff_B)
+        if not np.any(valid):
+            continue
+
+        counts_A.append(diag_A[valid])
+        counts_B.append(diag_B[valid])
+	   # Build a list of distances for each valid bin
+        distances_list.append(np.full(valid.sum(), d * resolution, dtype=np.float64))
+	#Distances list is only those inside the range
+    return (np.concatenate(distances_list), np.concatenate(counts_A), np.concatenate(counts_B))
+
+def get_distances_and_counts_individual(matrix: np.ndarray, resolution: int, 
+								upper_limit: float = 7e6, 
+								lower_limit: float = 5e4) -> tuple[np.ndarray, np.ndarray]:
+	n = matrix.shape[0]
+	min_d = int(max(1, lower_limit // resolution))
+	max_d = int(min(n, upper_limit // resolution))
+
+	distances_list, counts_list = [], []
+	for d in range(min_d, max_d):
+		diag = np.asarray(matrix.diagonal(d), dtype=np.float64).ravel()
+		valid = diag > 0
+		if not np.any(valid):
+			continue
+
+		counts_list.append(diag[valid])
+		distances_list.append(np.full(valid.sum(), d * resolution, dtype=np.float64))
+
+	return np.concatenate(distances_list), np.concatenate(counts_list)
+
+
+def calculate_distance_decay_individual(distances: np.ndarray, 
+							     counts_array: np.ndarray, 
+								metric: str='median', verbose=True):
+	'''Calculate distance decay for a single matrix
+	Args:
+		:param distances: array of distances (one value per bin), within the genomic range
+		:param counts_array: array of counts (must be the same length as distances), within the genomic range
+		:param metric: metric to use ('median' or 'mean') (what to use to calculate the decay per distance)
+		:param verbose: whether to print verbose output
+	Returns: 
+		# Distances, - linear 0
+		# Observed Metric Values, - linear 1
+		# Expected Fitted values from power law, -linear 2
+		# alpha - scalar (log) 3
+		# intercept - log 4
+		# ------------
+		# Log - log plots
+		# -------------
+		# log distances 5
+		# log values 6
+'''
+	unique_distances=np.unique(distances) 
+	labels = np.searchsorted(unique_distances,distances) #All distances are assigned a label corresponding to their unique distance index
+
+	if metric == 'median':
+		idx = np.arange(len(unique_distances))
+		#Map each count to its corresponding unique distance index
+		metric_decay = ndimage.median(counts_array,labels=labels,index=idx)
+
+	elif metric == 'mean':
+		# sum of counts (weights let us sum the counts, otherwise is occurrences of labels) for each unique distance/ label 
+		A = np.bincount(labels,weights=counts_array)
+		n = np.bincount(labels)
+		valid = n > 0
+		metric_decay = A[valid] / n[valid]
+
+	logx   = np.log(unique_distances)   # x   = log(d)
+	logy   = np.log(metric_decay)      # y   = log(P(d))
+
+	valid_values = np.isfinite(logy) & np.isfinite(logx)
+	logx_v, logy_v = logx[valid_values], logy[valid_values]
+
+	slope, intercept, r, *_ = linregress(logx_v, logy_v)
+
+	alpha = slope
+	fit = np.exp(intercept) * unique_distances[valid_values] ** alpha
+
+	if verbose:
+		print(f"α = {alpha:.2f}, intercept = {intercept:.2f}")
+
+	return [unique_distances[valid_values], metric_decay[valid_values], fit, alpha, intercept, logx_v, logy_v]
+
+def refit_intercept(metric_values: np.ndarray, distances_array: np.ndarray, desired_alpha: float, form='log') -> float:
+    '''Refit the decay curve to a desired alpha and return the expected counts.
+    :param form='log'    : inputs already log-transformed (from calculate_distance_decay [5,6])
+    :param form='linear' : inputs in linear space         (from calculate_distance_decay [0,1])
+    '''
+    m = -abs(desired_alpha)   # normalize sign — slope is always negative
+
+    if form == 'log':
+        logy, logd = metric_values, distances_array
+    elif form == 'linear':
+        logy = np.log(metric_values)
+        logd = np.log(distances_array)
+
+    b = np.mean(logy - m * logd)
+    return b
+
+def shared_intercept(A_values: list, B_values: list, desired_alpha: float) -> float:
+	'''Find the single intercept b that minimizes error for both A and B jointly.
+	Pools both log-count arrays and solves for b at the desired slope simultaneously.
+	This is the least-squares solution for b given fixed slope m, weighted by number of points.
+	When datasets are the same size, this equals the mean of the two individual intercepts.
+	When datasets differ in size, it naturally weights toward the larger/denser dataset.
+	Args:
+		:param A_values: list from calculate_distance_decay for dataset A
+		:param B_values: list from calculate_distance_decay for dataset B
+		:param desired_alpha: desired power-law exponent (positive or negative convention both accepted)
+	Returns:
+		b_shared: shared intercept in log space
+	'''
+	m = -abs(desired_alpha)   # normalize sign — slope is always negative
+
+	# Pool residuals from both datasets: b_i = logy_i - m·logx_i
+	# Taking the mean across all points jointly is the least-squares solution for b
+	b_shared = np.mean(np.concatenate([
+		A_values[6] - m * A_values[5],   # logy_A - m·logx  (residuals for A)
+		B_values[6] - m * B_values[5]    # logy_B - m·logx  (residuals for B)
+	]))
+	return b_shared
+
+def refit_decay(b: float, desired_alpha: float, distances_array: np.ndarray, form='log') -> np.ndarray:
+	'''Given the new intercept b and the desired alpha, return the expected counts for each distance in the array.
+	Args:
+		:param b: new intercept in log space
+		:param desired_alpha: desired power-law exponent
+		:param distances_array: array of distances
+		:param form: 'log' or 'linear'
+	Returns:
+		fit: array of expected counts
+	'''
+	m = -abs(desired_alpha)   # normalize sign if the user gave negative abs will turn positive
+	if form == 'log':
+		logd = distances_array
+	elif form == 'linear':
+		logd = np.log(distances_array)
+	return np.exp(b + m * logd)   # P(d) = e^b · d^m  back in linear space
+
+def get_factors(original:list, fit:list) -> np.ndarray:
+	'''Calculate the factors by which we need to multiply the original counts to get the fitted counts.
+	Args:
+		original: list of original counts
+		fit: list of fitted counts
+	Returns:
+		factors: array of factors
+	'''
+	factors = fit / original
+	return factors
+
+def apply_decay_factors(matrix: np.ndarray, factors: np.ndarray, distances: np.ndarray, resolution: int, outside_range='interp'):
+	'''Apply decay factors to a matrix based on the distance of the bins and the factors per distance.
+	Args:
+		matrix: dense matrix to which we want to apply the factors
+		factors: array of factors per distance (same size as distances)
+		distances: array of unique distances in bp corresponding to the factors inside the fitted range
+		resolution: bin resolution in base pairs
+		outside_range: how to handle distances outside the fitted range
+			'mean'  : apply the mean of all computed factors (neutral depth correction,
+			          no shape assumption — recommended for distances where power law doesn't hold)
+			'interp': clamp to the nearest boundary factor (assumes decay trend continues)
+	Returns:
+		normalized: dense matrix with the factors applied'''
+
+	n = matrix.shape[0]
+	normalized = matrix.astype(np.float64).copy()
+
+	# All diagonal distances in bp: d=1  resolution, d=2  2*resolution, ...
+	# 0 indexed but starting on d=1
+	d_bp_all = np.arange(1, n, dtype=np.float64) * resolution   # shape (n-1,)
+
+	if outside_range == 'mean':
+		# Within the fitted range - interpolate factor from the decay model
+		# Outside the fitted range - apply mean factor (neutral depth correction)
+		mean_factor = np.mean(factors)
+		d_min, d_max = distances[0], distances[-1]
+
+		within = (d_bp_all >= d_min) & (d_bp_all <= d_max)
+		#Initialize the array of factors with the mean factor, then override the values within the fitted range with the interpolated factors
+		all_factors = np.full(n - 1, mean_factor, dtype=np.float64)         # default: mean
+		all_factors[within] = np.interp(d_bp_all[within], distances, factors)  # override within range
+	elif outside_range == 'median':
+		# Within the fitted range - interpolate factor from the decay model
+		# Outside the fitted range - apply median factor (neutral depth correction)
+		median_factor = np.median(factors)
+		d_min, d_max = distances[0], distances[-1]
+
+		within = (d_bp_all >= d_min) & (d_bp_all <= d_max)
+		#Initialize the array of factors with the median factor, then override the values within the fitted range with the interpolated factors
+		all_factors = np.full(n - 1, median_factor, dtype=np.float64)         # default: median
+		all_factors[within] = np.interp(d_bp_all[within], distances, factors)  # override within range
+	elif outside_range == 'interp':
+		# the data to extrapolate, the data we know (x), and the factors we know (y)
+		# So all distances will have a factor
+		last_factor = factors[-1]
+		first_factor = factors[0]
+		d_min, d_max = distances[0], distances[-1]
+
+		within = (d_bp_all >= d_min) & (d_bp_all <= d_max)
+		#Initialize the array of factors with the last factor, then override the values within the fitted range with the interpolated factors
+		all_factors = np.full(n - 1, last_factor, dtype=np.float64)         # default: last factor
+
+		all_factors[within] = np.interp(d_bp_all[within], distances, factors).astype(np.float64)
+		all_factors[d_bp_all < d_min] = first_factor  # clamp to first factor for distances below the fitted range
+		# We are assuming that outside the fitted range the decay stays constant, so we are clamping the factors to the last factor for distances above the fitted range
+		all_factors[d_bp_all > d_max] = last_factor   # clamp to last factor for distances above the fitted range
+
+	# Apply factors — one factor per diagonal, vectorized interp already done above
+	for d in range(1, n): # never touch the main diagonal d=0
+		i = np.arange(n - d) # We get a vector of indices for the diagonal d
+		# adding i+d allow us to get the corresponding column
+		# d = 2, n =10
+		# i = [0,1,2,3,4,5,6,7]  # rows
+		# i+d = [2,3,4,5,6,7,8,9]  # columns, which allow us to get the diagonal d=2
+		normalized[i, i + d] *= all_factors[d - 1]
+		
+	normalized = np.asarray(normalized, dtype=np.float64).copy()
+
+	return normalized
+
+# ── Iterative Normalization functions ──────────────────────────────────────────────────────────
+def set_reference(counts_A,counts_B):
+	if counts_A.sum() >= counts_B.sum():
+		ref_counts = counts_A
+		to_scale_counts = counts_B
+		print("Matrix A is the reference (larger total counts). Scaling Matrix B to match.")
+	else:
+		ref_counts = counts_B
+		to_scale_counts = counts_A
+		print("Matrix B is the reference (larger total counts). Scaling Matrix A to match.")
+	return ref_counts, to_scale_counts
+
+def get_distances_and_counts(matrix_A, matrix_B, resolution, upper_limit=7e6, lower_limit=5e4):
+    n = matrix_A.shape[0]
+    #min_d max between 1 and the lower limit in bins, to avoid main diagonal d=0
+    min_d = int(max(1, lower_limit // resolution))
+    #max_d min between n and the upper limit in bins, to avoid going beyond the upper limit
+    max_d = int(min(n, upper_limit // resolution))
+
+    distances_list, counts_A, counts_B = [], [], []
+    for d in range(min_d, max_d):
+        diag_A = np.asarray(matrix_A.diagonal(d), dtype=np.float64).ravel()
+        diag_B = np.asarray(matrix_B.diagonal(d), dtype=np.float64).ravel()
+
+        # Each matrix contributes only bins where IT has real counts
+        # Using intersection: both must have real data to be included in the decay fit
+        valid = (diag_A > 0) & (diag_B > 0)
+        if not np.any(valid):
+            continue
+
+        counts_A.append(diag_A[valid])
+        counts_B.append(diag_B[valid])
+        distances_list.append(np.full(valid.sum(), d * resolution, dtype=np.float64))
+
+    return np.concatenate(distances_list), np.concatenate(counts_A), np.concatenate(counts_B)
+
+def calculate_distance_decay(distances,counts_A_array,counts_B_array,metric='median',verbose=True):
+	'''Calculates distance decay based on counts that lay between the distance decay limits.
+		By default it uses median to calculate it'''
+	
+	unique_distances=np.unique(distances)
+	#Map distances to dense integer labels i.e. the first distance
+	#in unique distances get 0, and it is assigned to all elements in distances that are that distance
+	labels = np.searchsorted(unique_distances,distances)
+
+	if metric == 'median':
+		#Index for distance
+		idx = np.arange(len(unique_distances))
+		# Calculates median of the values of an array over labeled regions
+		# Since labels already link the information of counts to distances 
+		# i.e. same distance have the same label, we avoid using a loop
+		metric_decay_A = ndimage.median(counts_A_array,labels=labels,index=idx)
+		metric_decay_B = ndimage.median(counts_B_array,labels=labels,index=idx)
+
+	elif metric == 'mean':
+	
+		#bincount Counts the number of occurrences on labels, how many bins we have per distance
+		#Which corresponds to the size of unique distances
+		#Since each element in labels corresponds to one count we can use weights 
+		#Basically is gonna sum the counts that have the same label 
+		# A and B are arrays with a lenght equal to the amount of unique distances
+		# The values inside each array are the sum of all bins that lay a given distance
+		A = np.bincount(labels,weights=counts_A_array)
+		B = np.bincount(labels,weights=counts_B_array)
+
+		n = np.bincount(labels)
+		valid = n > 0 # just in case, we don't want to encounter problems by dividing by 0
+
+		# For mean it will return an array which contains a mean per distance
+		metric_decay_A = A[valid] / n[valid]
+		metric_decay_B = B[valid] / n[valid]
+
+	# ── Log-log regression to extract chromatin alpha ──────────────────────────
+	# Power law:        P(d) = c · d^α
+	# Linearized:   log P(d) = α · log(d) + log(c)
+	# Linear form:          y = m · x     + b
+	# ───────────────────────────────────────────────────────────────────────────
+
+	logx   = np.log(unique_distances)   # x   = log(d)
+	logy_A = np.log(metric_decay_A)     # y_A = log(P_A(d))
+	logy_B = np.log(metric_decay_B)     # y_B = log(P_B(d))
+
+	# Remove points where log is undefined (counts were 0 - log(0) = -inf)
+	valid_values = np.isfinite(logy_A) & np.isfinite(logy_B) & np.isfinite(logx)
+	logx_v, logy_A_v, logy_B_v = logx[valid_values], logy_A[valid_values], logy_B[valid_values]
+
+	# Fit y = m·x + b  in log-log space
+	slope_A, intercept_A, r_A, *_ = linregress(logx_v, logy_A_v)  # slope_A = α_A,  intercept_A = log(c_A)
+	slope_B, intercept_B, r_B, *_ = linregress(logx_v, logy_B_v)  # slope_B = α_B,  intercept_B = log(c_B)
+
+	alpha_A, alpha_B = slope_A, slope_B   # α = m  (slope IS the power-law exponent)
+
+	# Back-transform fitted line to original space: P(d) = c · d^α
+	# intercept = log(c)  -  c = e^(intercept)
+	# fit = e^(intercept) · d^α  =  c · d^α
+	fit_A = np.exp(intercept_A) * unique_distances[valid_values] ** alpha_A
+	fit_B = np.exp(intercept_B) * unique_distances[valid_values] ** alpha_B
+
+	if verbose:
+		print(f"α_A = {alpha_A:.2f}, intercept_A = {intercept_A:.2f}")
+		print(f"α_B = {alpha_B:.2f}, intercept_B = {intercept_B:.2f}")
+	
+	#Returns: Distances, - linear 0
+			# Observed Metric Values, - linear 1
+			# Expected Fitted values from power law, -linear 2
+			# alpha - scalar (log) 3
+			# intercept - log 4
+			# ------------
+			# Log - log plots
+			# -------------
+			# log distances 5
+			# log values 6
+
+	A_values = [unique_distances[valid_values], 
+		   		metric_decay_A[valid_values], 
+				fit_A, 
+				alpha_A, 
+				intercept_A,
+				logx_v,
+				logy_A_v]
+	B_values = [unique_distances[valid_values], 
+		   		metric_decay_B[valid_values], 
+				fit_B, 
+				alpha_B, 
+				intercept_B,
+				logx_v,
+				logy_B_v]
+	return A_values,B_values
+
+def iterative_correction(matrix_A, matrix_B, resolution,metric='median',
+					weight_factor=-1.08, eta=0.15, tolerance=1e-6, filter=True,plot=False):
+	'''Iteratively corrects the distance decay of matrix_B to match that of matrix_A.
+	Args:
+		:param matrix_A: reference matrix (dense)
+		:param matrix_B: matrix to be corrected (dense)
+		:param resolution: bin resolution in base pairs
+		:param metric: metric to use for distance decay ('median' or 'mean')
+		:param weight_factor: factor for weighting the correction. Default is -1.08, which prioritizes short-range interactions.
+		:param eta: learning rate for the correction. Default is 0.15, which controls the step size of the correction.
+		:param tolerance: tolerance for convergence. Default is 1e-6, which determines when to stop iterating based on the improvement in error.
+		:param filter: whether to filter the matrices based on CI cutoffs. Default is True, which removes low-count bins that may introduce noise in the distance decay estimation.
+		:param plot: whether to plot the correction
+	'''
+
+	all_distances, counts_A1, counts_B1 = get_distances_and_counts_paired(matrix_A, matrix_B, resolution,filter=filter)
+	ref_counts, to_scale_counts = set_reference(counts_A1, counts_B1)
+	
+	#Multiple arrays are returned
+	ref_values, to_scale_values = calculate_distance_decay(
+		all_distances, ref_counts, to_scale_counts, verbose=False)
+	
+
+	alpha_ref,alpha_to_scale = abs(ref_values[3]),abs(to_scale_values[3])
+	
+	if alpha_ref < 1.08 and alpha_to_scale < 1.08:
+		print(f"Warning: Both matrices have shallow distance decay (α < 1.08). Iterative correction may be unstable.")
+		print(f"α_ref = {alpha_ref:.2f}, α_to_scale = {alpha_to_scale:.2f}")
+		print("Refitting reference decay to α = 1.08 before iterative correction for stability.")
+		
+		# log means that the inputs are already log-transformed (from calculate_distance_decay [5,6])
+		b_ref = refit_intercept(ref_values[6], ref_values[5], desired_alpha=1.08, form='log')
+		reffited_ref = refit_decay(b_ref, desired_alpha=1.08, distances_array=ref_values[5], form='log')
+		factors_ref = get_factors(ref_values[1], reffited_ref)
+		matrix_A = apply_decay_factors(matrix_A.astype(np.float64).copy(), factors_ref, ref_values[0], resolution, outside_range='interp')
+		
+		all_distances, counts_A1, counts_B1 = get_distances_and_counts_paired(matrix_A, matrix_B, resolution,filter=filter)
+		ref_counts, to_scale_counts = set_reference(counts_A1, counts_B1)
+	
+		#Multiple arrays are returned
+		ref_values, to_scale_values = calculate_distance_decay(
+			all_distances, ref_counts, to_scale_counts, verbose=False)
+		
+		print(f"Refitted reference decay to α = 1.08. New α_ref = {abs(ref_values[3]):.2f}")
+		
+	# Inside the genomic range
+	unique_distances = ref_values[0]
+	n_distances = len(ref_values[0])
+
+	best_error = np.abs(np.log(ref_values[1]) - np.log(to_scale_values[1]))
+	global_best_error = np.mean(best_error)
+	max_i = n_distances - 1
+	cycle = 1
+	G     = 1.0  # accumulated global scaling applied to to_scale_counts
+
+	while True:
+		no_improvement = 0
+
+		for i in range(max_i + 1):
+			#Correction is applying each factor to the WHOLE matrix not just the diagonal 
+			# The distance i only determines what ratio drives the scalar, not which diagonal gets corrected 
+			trial_counts, trial_values, trial_error, factor, trial_decay, ref_decay = correction(
+				ref_values, to_scale_values, to_scale_counts, all_distances, i,
+				metric=metric, weight_factor=weight_factor, eta=eta)
+
+			#Refvalues[i][1] is always the decay of the reference matrix at distance i, 
+			# to_scale_at_d is the decay of the matrix to be scaled at distance i, and trial_at_d is the decay of the trial matrix at distance i 
+			current_local_i = abs(np.log(ref_values[1][i]) - np.log(to_scale_values[1][i]))
+			# The trial_local_i is the error of the trial matrix (proposed movement) at distance i, which is the absolute difference between the log of the reference decay and the log of the trial decay at distance i
+			
+			trial_local_i   = abs(np.log(ref_values[1][i]) - np.log(trial_values[1][i]))
+			
+			# If the proposed movement improves the local error at distance i, we accept it
+			# then the trial becomes the new to_scale_values (which will influence on local_i of the next iteration)
+			# Basically is just comparing last iteration's error at distance i with the current iteration's error at distance i, if the current iteration's error is smaller than the last iteration's error, we accept the proposed movement
+			if trial_local_i + tolerance < current_local_i:
+				print(f"Improvement at distance index {i}: {current_local_i:.6f} -> {trial_local_i:.6f} (factor: {float(factor):.4f})")
+				best_error[i]   = trial_local_i
+				G              *= float(factor)
+				to_scale_counts = trial_counts
+				to_scale_values = trial_values
+
+				if plot:
+					plt.figure(figsize=(4, 3))
+					plt.plot(np.log(ref_values[0]), np.log(ref_decay), label='Reference Decay')
+					plt.plot(np.log(ref_values[0]), np.log(trial_decay), label='Scaled Decay')
+					plt.xlabel('Log Distance')
+					plt.ylabel('Log Value')
+					plt.title(f'Cycle {cycle}, Distance {ref_values[0][i]:.2f}, Error: {trial_local_i:.6f}')
+					plt.legend()
+					plt.show()
+			else:
+				no_improvement += 1
+
+		global_trial_error = np.mean(best_error[np.isfinite(best_error)])
+		print(f"Cycle {cycle}: G={G:.4f} | global error {global_best_error:.6f} -> {global_trial_error:.6f} | {no_improvement}/{max_i+1} no improvement")
+
+		if global_trial_error >= global_best_error:
+			print("Converged.")
+			break
+		global_best_error = global_trial_error
+		cycle += 1
+
+	# G is the global depth correction; to_scale_values[1] is B's decay after G scaling.
+	# Per-diagonal factors = G * (ref / converged_B) = total correction from original B per distance.
+	print(G)
+	#To scale values already have all the corrections applied, so we need to multiply by G to get the total correction from the original B per distance
+	# so all factors inside (ref_values[1] / to_scale_values[1]) should be near 1, because we applied the corrextions, and G is just the final scaling factor to get the total correction from the original B per distance
+	#to_scale_values[1]  =  original_B_decay × G_final
+	#ref / (original_B × G)
+
+	per_distance_factors = G * (ref_values[1] / to_scale_values[1])
+
+	scale_B = counts_A1.sum() >= counts_B1.sum() # True if A is the reference aka has more counts, False if B is the reference aka has more counts
+	
+	if scale_B:
+		# A had more counts - A is ref, B is to_scale - apply factors to B
+		matrix_A_norm_iterative = matrix_A.astype(np.float64).copy()
+		matrix_B_norm_iterative = apply_decay_factors(matrix_B.astype(np.float64).copy(), per_distance_factors,
+								unique_distances, resolution, outside_range='interp')
+	else:
+		# B had more counts - B is ref, A is to_scale - apply factors to A
+		matrix_A_norm_iterative = apply_decay_factors(matrix_A.astype(np.float64).copy(), per_distance_factors,
+								unique_distances, resolution, outside_range='interp')
+		matrix_B_norm_iterative = matrix_B.astype(np.float64).copy()
+
+	matrix_A_norm_iterative,matrix_B_norm_iterative=np.asarray(matrix_A_norm_iterative),np.asarray(matrix_B_norm_iterative)
+
+	return matrix_A_norm_iterative, matrix_B_norm_iterative
+
+def correction(ref_values, to_scale_values, to_scale_counts, distances, i,
+			   metric='median', weight_factor=-1.08, eta=0.15):
+	unique_distances = ref_values[0]
+	ratios = ref_values[1] / to_scale_values[1]
+	weights = unique_distances ** weight_factor
+	weights = weights / weights.max()
+
+
+	#weight flips direction at long distances
+	#raw_factor = ratios[i] * weights[i]
+	#factor = 1 + eta * (raw_factor - 1)
+
+	factor = 1 + eta * (ratios[i] - 1)
+
+	trial_counts = to_scale_counts * factor
+	# calculate everything again to get the new decay after applying the factor
+	trial_values = calculate_distance_decay_individual(
+		distances, trial_counts, metric=metric, verbose=False)
+
+	ref_decay = ref_values[2]
+	trial_decay = trial_values[2]
+
+	# this is the error of all distances, weighted by distance to prioritize fitting the short-range decay
+	def _error(scaled_decay, ref_decay, error_type='mse'):
+		if error_type == 'mse':
+			se = ((np.log(scaled_decay) - np.log(ref_decay)) ** 2)
+			w = unique_distances ** weight_factor
+			w = w / w.sum()
+			return np.average(se, weights=w)
+		else:
+			raise ValueError(f"Unsupported error type: {error_type}")
+
+	trial_error = _error(trial_decay, ref_decay)
+	return trial_counts, trial_values, trial_error, factor, trial_decay, ref_decay
+
+def iterative_correction_v1(matrix_A, matrix_B, resolution,metric='median',
+					weight_factor=-1.08, eta=0.15, tolerance=1e-6, filter=True,plot=False):
+	'''Iteratively corrects the distance decay of matrix_B to match that of matrix_A.
+	Args:
+		:param matrix_A: reference matrix (dense)
+		:param matrix_B: matrix to be corrected (dense)
+		:param resolution: bin resolution in base pairs
+		:param metric: metric to use for distance decay ('median' or 'mean')
+		:param weight_factor: factor for weighting the correction. Default is -1.08, which prioritizes short-range interactions.
+		:param eta: learning rate for the correction. Default is 0.15, which controls the step size of the correction.
+		:param tolerance: tolerance for convergence. Default is 1e-6, which determines when to stop iterating based on the improvement in error.
+		:param filter: whether to filter the matrices based on CI cutoffs. Default is True, which removes low-count bins that may introduce noise in the distance decay estimation.
+		:param plot: whether to plot the correction
+	'''
+	best_error  = float("inf")
+	updated_factor = 1.0
+	min_window = 10 # minimum number of distances to check per cycle
+
+	all_distances, counts_A1, counts_B1 = get_distances_and_counts_paired(matrix_A, matrix_B, resolution,filter=filter)
+	ref_counts, to_scale_counts = set_reference(counts_A1, counts_B1)
+	
+
+	ref_values, to_scale_values = calculate_distance_decay(
+		all_distances, ref_counts, to_scale_counts, verbose=False)
+
+	n_distances = len(ref_values[0])
+	max_i = n_distances - 1  # start with full range
+
+	improved = True
+	cycle = 1
+	while improved:
+		no_improvement = 0
+		improved = False
+		last_improvement_idx = -1
+
+		#i is the current distance index for the correction step
+		# So basically it iterates and corrects by distance
+		# But the WMSE takes into consideration the effect of the refitting in all the distances, not just the one being corrected
+		# Convergence will always be reached because we only update the best error and the counts if there is a significant improvement, so eventually we will reach a point where no further improvements are possible and the loop will stop. The tolerance threshold ensures that we don't get stuck in an infinite loop due to very small improvements that may not be meaningful.
+		for i in range(max_i + 1):
+			trial_counts, trial_values, trial_error, factor, trial_decay, ref_decay = correction(
+				ref_values, to_scale_values, to_scale_counts, all_distances, i,
+				metric=metric, weight_factor=weight_factor, eta=eta)
+			# After applying the correction for distance i we check if the error has improved compared to the best error so far. We use a tolerance threshold to determine if the improvement is significant enough to update our best error and continue iterating.
+			if trial_error + tolerance < best_error:
+				print(f"Improvement at distance {ref_values[0][i]:.2f}: error improved from {best_error:.6f} to {trial_error:.6f} (factor: {factor:.4f})")
+				to_scale_counts = trial_counts
+				to_scale_values = trial_values
+				best_error = trial_error
+				updated_factor *= factor
+				improved = True
+				last_improvement_idx = i
+				if plot:
+					plt.figure(figsize=(4, 3))
+					plt.plot(np.log(ref_values[0]), np.log(ref_decay), label='Reference Decay')
+					plt.plot(np.log(ref_values[0]), np.log(trial_decay), label='Scaled Decay')
+					plt.xlabel('Log Distance')
+					plt.ylabel('Log Value')
+					plt.title(f'Cycle {cycle}, Distance {ref_values[0][i]:.2f}, Error: {trial_error:.6f}')
+					plt.legend()
+					plt.show()
+			else:
+				no_improvement += 1
+
+		# Window for next cycle to last index that improved, with a minimum of min_window
+		if improved:
+			max_i = max(last_improvement_idx, min_window - 1)
+			print(f"Next cycle will search up to index {max_i} (distance {ref_values[0][max_i]:.2f})")
+
+		cycle += 1
+		print(f"Out of {max_i + 1} distances checked, {no_improvement} showed no improvement in this cycle.")
+		if not improved:
+			print("No improvement in this cycle, stopping correction.")
+			break
+	
+
+	matrix_B_norm_iterative = matrix_B.copy() * updated_factor
+	matrix_A_norm_iterative = matrix_A.copy() * 1.0
+	
+	return matrix_A_norm_iterative, matrix_B_norm_iterative
+
+	
+# ── Differential Interactions ──────────────────────────────────────────────────────────────────
+# MAIN
+def differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.ndarray, resolution: float, permutations_n: int = 1000, pvalue_cutoff: float = 0.05, log2fc_cutoff: float = 0,
+						filter_by: str = 'pvalue', neighbor_support: bool = True, bayesian: bool = True,
+						upper_limit: float = 7e6, lower_limit: float = 5e4, adjusted_pvalues_method: str = 'distance', do_cutoff: bool = True,
+						differential_reference=False):
+	'''
+	Docstring for differential_interactions
+	
+	:param norm_matrix_A: Description
+	:type norm_matrix_A: np.ndarray
+	:param norm_matrix_B: Description
+	:type norm_matrix_B: np.ndarray
+	:param matrix_A: Description
+	:type matrix_A: np.ndarray
+	:param matrix_B: Description
+	:type matrix_B: np.ndarray
+	:param resolution: Description
+	:type resolution: float
+	:param permutations_n: Description
+	:type permutations_n: int
+	:param pvalue_cutoff: Description
+	:type pvalue_cutoff: float
+	:param log2fc_cutoff: Description
+	:type log2fc_cutoff: float
+	:param filter_by: Description
+	:type filter_by: str
+	:param neighbor_support: Description
+	:type neighbor_support: bool
+	:param bayesian: Description
+	:type bayesian: bool
+	:param upper_limit: Description
+	:type upper_limit: float
+	:param lower_limit: Description
+	:type lower_limit: float
+	:param adjusted_pvalues_method: Description
+	:type adjusted_pvalues_method: str
+	:param do_cutoff: Description
+	:type do_cutoff: bool
+	'''
+	if do_cutoff:
+		rows, cols, log2fc, pvalues, distances, Avalues, Bvalues = get_differential_interactions(norm_matrix_A, norm_matrix_B, resolution, 
+															  permutations_n=permutations_n, bayesian=bayesian,
+																 upper_limit=upper_limit, lower_limit=lower_limit,do_cutoff=True,differential_reference=differential_reference)
+	else:
+		rows, cols, log2fc, pvalues, distances, Avalues, Bvalues = get_differential_interactions(norm_matrix_A, norm_matrix_B, resolution, 
+															  permutations_n=permutations_n, bayesian=bayesian,
+																 upper_limit=upper_limit, lower_limit=lower_limit,do_cutoff=False,differential_reference=differential_reference)
+	print(f"[1] Total bin pairs tested                          : {len(rows):,}")
+	total_tested = len(rows)
+
+	# If the size of all the elements is not the same, quit
+	if not (len(rows) == len(cols) == len(log2fc) == len(pvalues) == len(distances)== len(Avalues) == len(Bvalues)):
+		raise ValueError("The lengths of rows, cols, log2fc, pvalues, distances, Avalues, and Bvalues must be the same.")
+		sys.exit(1)
+		
+	if adjusted_pvalues_method == 'distance':
+		print(f"Adjusting p-values by distance using method: {adjusted_pvalues_method}")
+		# Size is the same as pvalues, i.e, the number of bins that passed the cutoff
+		adjusted_pvalues = adjust_pvalues_by_distance(pvalues, distances, method='fdr_bh')
+		print(adjusted_pvalues.shape)
+	elif adjusted_pvalues_method == 'global':
+		print(f"Adjusting p-values globally using method: {adjusted_pvalues_method}")
+		adjusted_pvalues = adjust_pvalues_global(pvalues, method='fdr_bh')
+		print(adjusted_pvalues.shape)
+	else:
+		raise ValueError(f"Unsupported adjusted p-values method: {adjusted_pvalues_method}")
+
+	# Filter by raw pvalue (used when filter_by='pvalue')
+	significant_rows, significant_cols, significant_log2fc, significant_pvalues, significant_adjusted_pvalues, significant_distances, significant_Avalues, significant_Bvalues = filter_significant_interactions(
+	rows, cols, log2fc, pvalues, adjusted_pvalues, distances, Avalues, Bvalues, pvalue_cutoff=pvalue_cutoff, log2fc_cutoff=log2fc_cutoff
+	)
+	print(f"[2] Significant by pvalue<={pvalue_cutoff} & |log2fc|>={log2fc_cutoff} : {len(significant_rows):,}")
+
+	# Filter by adjusted pvalue independently on the full set (not pre-filtered by raw pvalue)
+	mask_padj_full = (adjusted_pvalues <= pvalue_cutoff) & (np.abs(log2fc) >= log2fc_cutoff)
+	padj_rows      = rows[mask_padj_full]
+	padj_cols      = cols[mask_padj_full]
+	padj_log2fc    = log2fc[mask_padj_full]
+	padj_pvalues   = pvalues[mask_padj_full]
+	padj_adjusted  = adjusted_pvalues[mask_padj_full]
+	padj_distances = distances[mask_padj_full]
+	padj_Avalues   = Avalues[mask_padj_full]
+	padj_Bvalues   = Bvalues[mask_padj_full]
+	print(f"[3] Significant by padjusted<={pvalue_cutoff} & |log2fc|>={log2fc_cutoff}: {mask_padj_full.sum():,}")
+
+	#All of these are just significant by pvalue and logfold
+	sig_by_pval = pd.DataFrame({
+	'row': significant_rows,
+	'col': significant_cols,
+	'log2fc': significant_log2fc,
+	"condition_A_counts": significant_Avalues,
+	"condition_B_counts": significant_Bvalues,
+	'pvalue': significant_pvalues,
+	'adjusted_pvalue': significant_adjusted_pvalues,
+	'distance': significant_distances
+	})
+
+	sig_by_pval = neighbor_support_f(sig_by_pval)
+	n_support_pval = sig_by_pval['neighbor_support'].sum()
+	print(f"[4] With neighbor support (of pval-significant)     : {n_support_pval:,}")
+
+	# Build padjusted DataFrame independently from the full set
+	sig_by_padj = pd.DataFrame({
+		'row': padj_rows, 'col': padj_cols, "condition_A_counts": padj_Avalues, 
+		"condition_B_counts": padj_Bvalues, 'log2fc': padj_log2fc,
+		'pvalue': padj_pvalues, 'adjusted_pvalue': padj_adjusted, 'distance': padj_distances
+	})
+
+	sig_by_padj = neighbor_support_f(sig_by_padj)
+	n_support_padj = sig_by_padj['neighbor_support'].sum()
+	print(f"[5] With neighbor support (of padjusted-significant): {n_support_padj:,}")
+	print(f"    --> Filtering by: {filter_by} | neighbor_support in plot={neighbor_support}")
+
+	if filter_by == 'pvalue':
+		if len(sig_by_pval) > 0:
+			if neighbor_support:
+				mask = sig_by_pval['neighbor_support'].values.astype(bool)
+				plot_MA_significant(norm_matrix_A, norm_matrix_B, resolution, log2fc_cutoff, upper_limit=upper_limit, lower_limit=lower_limit, xscale='log', sig_rows=significant_rows[mask], sig_cols=significant_cols[mask])
+			else:
+				plot_MA_significant(norm_matrix_A, norm_matrix_B, resolution, log2fc_cutoff, upper_limit=upper_limit, lower_limit=lower_limit, xscale='log', sig_rows=significant_rows, sig_cols=significant_cols)
+		return sig_by_pval,total_tested
+
+	elif filter_by == 'padjusted':
+		if len(sig_by_padj) > 0: #because if we don't have significant interactions then we cannot get the neighbor support, and we cannot plot, so we need to check if we have significant interactions before trying to get the neighbor support and plot
+			if neighbor_support:
+				mask_n = sig_by_padj['neighbor_support'].values.astype(bool)
+				plot_MA_significant(norm_matrix_A, norm_matrix_B, resolution, log2fc_cutoff, upper_limit=upper_limit, lower_limit=lower_limit, xscale='log', sig_rows=padj_rows[mask_n], sig_cols=padj_cols[mask_n])
+			else:
+				plot_MA_significant(norm_matrix_A, norm_matrix_B, resolution, log2fc_cutoff, upper_limit=upper_limit, lower_limit=lower_limit, xscale='log', sig_rows=padj_rows, sig_cols=padj_cols)
+		return sig_by_padj,total_tested
+
+def get_differential_interactions(norm_matrix_A: np.ndarray, norm_matrix_B: np.ndarray, resolution: int, permutations_n: int,
+						    upper_limit=7e6, lower_limit=5e4, bayesian=True, do_cutoff=True,differential_reference=False):
+	''''Identify differential interactions between two normalized matrices using a permutation-based approach.
+	Args:
+	norm_matrix_A: normalized contact matrix for sample A
+	norm_matrix_B: normalized contact matrix for sample B
+	resolution: bin resolution in base pairs
+	permutations_n: number of permutations to perform for significance testing
+	cut_off: p-value cutoff for significance
+	upper_limit: upper distance limit for testing interactions (default 7Mb)
+	lower_limit: lower distance limit for testing interactions (default 50kb)
+	bayesian: whether to use Bayesian estimation for log2 fold changes (default True)
+	Returns:
+	significant_rows: array of row indices for significant interactions
+	significant_cols: array of column indices for significant interactions
+	significant_log2fc: array of log2 fold changes for significant interactions
+	pvalues_significant: array of p-values for significant interactions
+	distances_significant: array of genomic distances for significant interactions'''
+	#### _______ Initial normalized matrices _______
+
+	
+	if bayesian:
+		#Obs rows and cols are the indices of the bins that have valid counts in both matrices, so we can compute log2fc only for those bins. The distances and log2fc arrays will be filtered to only include those bins.
+		distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, Avalues_in, Bvalues_in, Avalues_out, Bvalues_out = compute_log2fc_bayesian(norm_matrix_A,norm_matrix_B,resolution,lower_limit, upper_limit)
+		# For permutation test, use raw log2fc so the comparison is not biased by Bayesian shrinkage
+		_, log2_fc_raw, _, log2_fc_raw_out, *_ = compute_log2fc(norm_matrix_A, norm_matrix_B, resolution, upper_limit, lower_limit)
+		raw_log2fc_for_perm = np.concatenate([log2_fc_raw, log2_fc_raw_out]) if log2_fc_raw_out.size else log2_fc_raw
+	else:
+		distances, log2_fc, distances_out, log2_fc_out , obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc(norm_matrix_A, norm_matrix_B, resolution,lower_limit, upper_limit)
+
+	# Get cutoffs
+	#Must be roughly the same because we have normalized
+	cutA,cutB = _calculate_cutoffs(norm_matrix_A, norm_matrix_B,
+						      resolution, upper_limit, confidence_level=0.95)
+
+	print(f"Removing bins below cutoff (overdispersed): cutA={cutA:.4f}, cutB={cutB:.4f}")
+
+	mask_matrix = (norm_matrix_A >= cutA) & (norm_matrix_B >= cutB)
+
+	# This is to get the amount of reads to sample, we cannot make the cutoff here because we need to model dispersion in the permutation test
+	# These have to use the original counts, because they define the variance of the null distribution (how spread the fc are)
+	# Normalization does not change the total number of reads, it only rescales the values.
+	# If we use an inflated n, we will get a narrow null distribution, which leaves small room, and the multinomial becomes too precise, everything will be significant.
+	# Changed to use original counts
+
+	n_A,n_B=get_reads_count(norm_matrix_A), get_reads_count(norm_matrix_B)
+
+	distances = np.concatenate([distances, distances_out]) if distances_out.size else distances
+	observed_log2fc    = np.concatenate([log2_fc,   log2_fc_out])   if log2_fc_out.size   else log2_fc
+	
+	# Use raw log2fc for permutation test when bayesian=True to keep the comparison symmetric
+	obs_log2fc = raw_log2fc_for_perm if bayesian else observed_log2fc
+
+	Avalues = np.concatenate([Avalues_in, Avalues_out]) if Avalues_out.size else Avalues_in
+	Bvalues = np.concatenate([Bvalues_in, Bvalues_out]) if Bvalues_out.size else Bvalues_in
+
+	# Filter all arrays to bins where average cutoff is met, if requested
+
+	
+	if do_cutoff: 
+		# whether the specific bin passed the cutoff
+		cutoff_mask = mask_matrix[obs_rows, obs_cols]
+		# Keep only those bins
+		obs_rows_f       = obs_rows[cutoff_mask]
+		obs_cols_f       = obs_cols[cutoff_mask]
+		distances      = distances[cutoff_mask]
+		observed_log2fc = observed_log2fc[cutoff_mask]
+		obs_log2fc    = obs_log2fc[cutoff_mask]
+		Avalues         = Avalues[cutoff_mask]
+		Bvalues         = Bvalues[cutoff_mask]
+
+	# _______ Create background matrix for permutation testing _______
+	# ______ Keep all info because we are modeling dispersion in the background too
+	
+	obs_A = np.asarray(norm_matrix_A,dtype=np.float64)
+	obs_B = np.asarray(norm_matrix_B,dtype=np.float64)
+	
+	if differential_reference:
+		#Load and take the reference matrix as the background
+		print("Not yet implemented, using the sum of both matrices as background")
+	else:
+		background = obs_A + obs_B
+	# We keep all bins because we need to model the dispersion
+	background = np.asarray(background, dtype=np.float64)
+	background = background[obs_rows, obs_cols] #
+
+
+	# The trick is here, probabilities are always fixed, because we divided them, so it does not matter the initial number of reads 
+	# Bin_i will always have the same probability of being sampled, and the multinomial will take care of the variance, because it is a random sampling process
+	probs = background / background.sum()
+
+	# Same size as the initial log fold change array
+	# The size changes because we will filter inside the loop to only keep bins with mask
+	exceed_counts = np.zeros(len(observed_log2fc), dtype=np.int32)
 
 	for p in range(permutations_n):
-		print('Starting subsampling', p+1)
-		down_mat1 = matrix_downsampling(background_matrix, n_reads1)
-		down_mat2 = matrix_downsampling(background_matrix, n_reads2)
+		print("Subsample: ", p+1, "/", permutations_n)
+		# Downsample A and B from the background matrix using multinomial distribution
+		counts_A = np.random.multinomial(n_A, probs)
+		counts_B = np.random.multinomial(n_B, probs)
 
-		df1 = matrix2df(down_mat1)
-		df2 = matrix2df(down_mat2)
-		if method == 'difference':
-			permutation_dataframe = merge_matrices_df_difference(df1, df2, resolution=resolution)  
-			permutation_dataframe = permutation_dataframe[['bin1', 'bin2', 'diff']].rename(
-							columns={'diff': f'diff_{p+1}'}
-			)	
-		elif method == 'log2fc':
-			permutation_dataframe = merge_matrices_df_log2fc(df1, df2, resolution=resolution)
-			permutation_dataframe = permutation_dataframe[['bin1', 'bin2', 'log2_fc']].rename(
-							columns={'log2_fc': f'log2_fc_{p+1}'}
-			)
-		all_perms = pd.merge(all_perms, permutation_dataframe, on=['bin1', 'bin2'], suffixes=('_obs', '_perm'))
-	
-	#Here is the filter before performing p-value calculations
-	#all_perms = all_perms[all_perms['distance'] <= upper_limit].reset_index(drop=True)
-	all_perms = all_perms[(all_perms['count_1'] > 0.0) & (all_perms['count_2'] > 0.0)].reset_index(drop=True)
-	
-	return all_perms
+		# Here is where we apply the IF cutoff to the counts, so that we only keep bins that pass the cutoff for the permutation test. This ensures that we are comparing apples to apples, and not including bins that are too sparse to be reliable.
+		# Because we need to compare the same bins that are in the observed log2fc, we need to apply the same mask to the counts. This is important because we want to make sure that we are comparing the same set of bins in both the observed and permuted data.
+		counts_A = counts_A[cutoff_mask] if do_cutoff else counts_A
+		counts_B = counts_B[cutoff_mask] if do_cutoff else counts_B
+		# I don't know if we should also do the bayesian estimation here, or just compute the log2fc directly from the counts. For now, I will just compute the log2fc directly from the counts, but we can change it later if we want to be more consistent with the observed log2fc.
+		#if a pvalue is small after the bayesian estimation, then comparing against the normal values will 
+		# always be small vs 'bigger'
+		# Lets say i got 0.5 after bayesian
+		# then i do all logs on the subsampling tests, most likely these are gonna be bigger than the bayesian one
+		# so our numerator will be close to the number of permutations
+		# and the pvalue of those small logfc will be close to 1
+		# Which makes more sense because if the log2fc was pushed to zero by the bayesian stimation
+		# then it should come from sparse counts
+		# therefore it is not confident calling, then it makes sense that the log2fc values from the subsampling will be bigger than the observed one, 
+		# and therefore the pvalue will be close to 1, which is what we expect for low confidence calls
+		log2_fc_perm = np.log2((counts_A) / (counts_B))
 
-def get_p_values(merged_df,method='log2fc'):
-	'''Calculate empirical p-values
+		exceed_counts += (np.abs(log2_fc_perm) > np.abs(obs_log2fc)).astype(np.int32)
+
+	# Go back to coordinates of the bins
+	p_values = exceed_counts+1 / permutations_n
+
+	if do_cutoff:
+		obs_rows = obs_rows_f
+		obs_cols = obs_cols_f
+	
+	return obs_rows, obs_cols, observed_log2fc, p_values, distances, Avalues, Bvalues
+
+def adjust_pvalues_by_distance(pvalues, distances, method='fdr_bh'):
+	'''Adjust p-values for multiple testing while accounting for genomic distance.
 	Args:
-		merged_df: DataFrame with observed and permutation differences
+	pvalues: array of p-values to adjust
+	distances: array of genomic distances corresponding to each p-value
+	method: method for multiple testing correction (default 'fdr_bh' for Benjamini-Hochberg)
 	Returns:
-		merged_df: DataFrame with an additional 'p_value' column
-	'''
-	if method == "difference":
-		num_permutations = len([col for col in merged_df.columns if col.startswith('diff_')])
-	elif method == "log2fc":
-		num_permutations = len([col for col in merged_df.columns if col.startswith('log2_fc_')])
-	p_values = []
+	adjusted_pvalues: array of adjusted p-values'''
 
-	for _, row in merged_df.iterrows():
-		if method == "log2fc":
-			obs_diff = abs(row['log2_fc'])
-			# count how many permuted absolute log2 fcs are >= observed absolute log2 fc
-			count = sum(abs(row[f'log2_fc_{i+1}']) > obs_diff for i in range(num_permutations))
-		elif method == "difference":
-			obs_diff = abs(row['diff'])  # take absolute value of observed
-			# count how many permuted absolute diffs are >= observed absolute diff
-			count = sum(abs(row[f'diff_{i+1}']) > obs_diff for i in range(num_permutations))
-			
-		# empirical p-value 
-		p_value = (count) / (num_permutations)
-		p_values.append(p_value)
+	unique_distances = np.unique(distances)
+	adjusted_pvalues = np.ones_like(pvalues)
+	for d in unique_distances:
+		# The key is generating this mask that will help us retrieve each entry 
+		# corresponding to a given distance
+		mask = distances == d
+		# So we can get pvalues that correspond to a given distance with the mask
+		pvalues_d = pvalues[mask]
+		if len(pvalues_d) > 0:
+			# And apply the multiple testing correction method to the p-values of that distance
+			_, adj_pvalues_d, _, _ = multipletests(pvalues_d, method=method)
+			# We can just populate the already defined array of adjusted pvalues with the mask
+			adjusted_pvalues[mask] = adj_pvalues_d
 
-	merged_df['p_value'] = p_values
-	return merged_df
- 
-def reformat_permutation_df(df, resolution, upper_limit=7e6, lower_limit=0):
+	return adjusted_pvalues
 
-    df = df.copy()  # FORCE real copy, avoids hidden duplication
-    
-    df.columns = ['bin1', 'bin2', 'count_1', 'count_2', 'difference', 'p_value']
-    
-    # keep upper triangle
-    df = df.loc[df['bin2'] > df['bin1']].copy()
-    
-    # distance
-    df['distance'] = resolution * (df['bin2'] - df['bin1']).abs()
-    
-    # distance filter
-    df = df.loc[
-        (df['distance'] > lower_limit)
-    ].copy()
-    
-    # count filter
-    df = df.loc[
-        (df['count_1'] > 0.0) &
-        (df['count_2'] > 0.0)
-    ].copy()
-    
-    # log2 fold change
-    df['log2_fc'] = np.log2((df['count_1'] + 0.01) /
-                            (df['count_2'] + 0.01))
-    
-    return df[['bin1','bin2','count_1','count_2','log2_fc','distance','p_value']]
-
-def adjust_p_values(merged_df):
-	'''Apply Benjamini-Hochberg correction to p-values in the
-	merged_df: DataFrame with a 'p_value' column
-	Returns:
-		merged_df: DataFrame with an additional 'p_value_adj' and FDR column
-	'''
-	#Filtering should be done before to avoid adjusting p-values for tests we are not interested in.
-	#If we include them then we will be saying they are part on the 5% FDR when in reality we don't care about them.
-	#	An adjusted p-value is the minimum FDR threshold at which that test would still be significant.
-	pvals = merged_df['p_value'].values
-	_, pvals_adj, _, FDR = multipletests(pvals, method='fdr_bh')
-	merged_df['p_value_adj'] = pvals_adj
-	merged_df['FDR'] = FDR
-	return merged_df
-
-def prior_probability(counts_1,counts_2,true_fc,tau2=1.0):
-	theta_vals = np.linspace(true_fc.min(), true_fc.max(),len(counts_1))
-	# Assume a normal prior with a mean of 0 and variance tau2
-	prior = np.exp(-theta_vals**2 / (2 * tau2)) / np.sqrt(2 * np.pi * tau2)
-	prior /= np.trapz(prior, theta_vals)  # Normalize the prior
-	return prior, theta_vals
-
-def likelihood(counts_1,counts_2,theta_vals):
-	p_theta = 2**theta_vals / (1 + 2**theta_vals)
-	logL = (counts_1 * np.log(p_theta) + counts_2 * np.log(1 - p_theta))
-	logL -= logL.max(axis=1, keepdims=True)  # For numerical stability
-	L = np.exp(logL)
-	L /= np.trapz(L, theta_vals, axis=1)  # Normalize the likelihoods
-	return L
-
-def posterior_distribution(prior, L, theta_vals):
-	posterior = L * prior[None, :]
-	posterior /= np.trapz(posterior, theta_vals, axis=1)  # Normalize the posterior
-	return posterior
-
-def posterior_summary(posterior, theta_vals):
-	post_mean = np.trapz(theta_vals * posterior, theta_vals, axis=1)
-	i_map = np.argmax(posterior, axis=1)
-	theta_map = theta_vals[i_map]
-	return post_mean, theta_map
-
-def bayesian_fc_estimation(permutations_df,tau2=1.0):
-	"""
-	Estimate the posterior mean and variance of the log2 fold change using a Bayesian approach.
-	
-	Parameters:
-	permutations_df (pd.DataFrame): DataFrame containing observed log2 fold changes and their variances.
-	tau2 (float): Prior variance for the log2 fold change.
-	
-	Returns:
-	pd.DataFrame: Updated DataFrame with posterior mean and variance of log2 fold change.
-	"""
-	counts_1 = permutations_df['count_1'].to_numpy()[:,None]
-	counts_2 = permutations_df['count_2'].to_numpy()[:,None]
-	true_log2fc = permutations_df['log2_fc'].to_numpy()[:,None]
-	prior, theta_vals = prior_probability(counts_1, counts_2, true_log2fc, tau2)
-	L = likelihood(counts_1, counts_2, theta_vals)
-	posterior = posterior_distribution(prior, L, theta_vals)
-	post_mean, theta_map = posterior_summary(posterior, theta_vals)
-
-	final_df = permutations_df.copy()
-	final_df['post_mean_log2fc'] = post_mean
-	final_df['post_map_log2fc'] = theta_map
-	final_df = final_df[['bin1','bin2','count_1','count_2','log2_fc','post_mean_log2fc','post_map_log2fc','distance','p_value','p_value_adj']]
-
-
-	return final_df
-
- 
-def significant_interactions(permutations_df,pval,lg2_fc_cutoff=0,column='p_value_adj'):
-	'''Filter significant interactions based on a p-value threshold.
+def adjust_pvalues_global(pvalues, method='fdr_bh'):
+	'''Adjust p-values for multiple testing across all interactions without accounting for distance.
 	Args:
-		permutations_df
-		pval: significance threshold for calling a difference significant
-		column: user can choose between p_value or p_value_adj, default is 'p_value_adj'
+	pvalues: array of p-values to adjust
+	method: method for multiple testing correction (default 'fdr_bh' for Benjamini-Hochberg)
 	Returns:
-		predicted_positive: DataFrame with significant interactions
-	'''
-	# Total number of tests
-	permutations_df['tests'] = len(permutations_df)
-	predicted_positive = permutations_df[(permutations_df[column]< pval) & (permutations_df['distance'] > 0)]
-	predicted_positive = predicted_positive[(predicted_positive['post_map_log2fc'] >= lg2_fc_cutoff) | (predicted_positive['post_map_log2fc'] <= -lg2_fc_cutoff)]
-	predicted_positive = predicted_positive[['bin1','bin2','count_1','count_2','log2_fc','post_mean_log2fc','post_map_log2fc','distance','p_value','p_value_adj']]
+	adjusted_pvalues: array of adjusted p-values'''
+	_, adjusted_pvalues, _, _ = multipletests(pvalues, method=method)
+	return adjusted_pvalues
 
-	return predicted_positive
-
-def significant_interactions_no_bayesian(permutations_df,pval,log2_fc_cutoff=0,column='p_value_adj'):
-	'''Filter significant interactions based on a p-value threshold.
+def filter_significant_interactions(rows, cols, log2fc, pvalues, adjusted_pvalues, distances, Avalues, Bvalues, pvalue_cutoff=0.05, log2fc_cutoff=1):
+	'''Filter interactions based on  p-value and log2 fold change cutoffs.
 	Args:
-		permutations_df
-		pval: significance threshold for calling a difference significant
-		column: user can choose between p_value or p_value_adj, default is 'p_value_adj'
+	rows: array of row indices for interactions
+	cols: array of column indices for interactions
+	log2fc: array of log2 fold changes for interactions
+	pvalues: array of raw p-values for interactions
+	adjusted_pvalues: array of adjusted p-values for interactions
+	distances: array of genomic distances for interactions
+	pvalue_cutoff: significance cutoff for adjusted p-values (default 0.05)
+	log2fc_cutoff: minimum absolute log2 fold change for significance (default 1)
 	Returns:
-		predicted_positive: DataFrame with significant interactions
-	'''
-	# Total number of tests
-	permutations_df['tests'] = len(permutations_df)
-	predicted_positive = permutations_df[(permutations_df[column]< pval) & (permutations_df['distance'] > 0)]
-	predicted_positive = predicted_positive[(predicted_positive['log2_fc'] >= log2_fc_cutoff) | (predicted_positive['log2_fc'] <= -log2_fc_cutoff)]
-	predicted_positive = predicted_positive[['bin1','bin2','count_1','count_2','log2_fc','distance','p_value','p_value_adj']]
+	significant_rows: array of row indices for significant interactions based on pvalue cutoff and log2fc cutoff
+	significant_cols: array of column indices for significant interactions based on pvalue cutoff and log2fc cutoff
+	significant_log2fc: array of log2 fold changes for significant interactions based on pvalue cutoff and log2fc cutoff
+	significant_pvalues: array of adjusted p-values for significant interactions
+	significant_distances: array of genomic distances for significant interactions'''
+	significant_mask = (pvalues <= pvalue_cutoff) & (np.abs(log2fc) >= log2fc_cutoff)
+	return rows[significant_mask], cols[significant_mask], log2fc[significant_mask], pvalues[significant_mask], adjusted_pvalues[significant_mask],	 distances[significant_mask], Avalues[significant_mask], Bvalues[significant_mask]
 
-	return predicted_positive
+def plot_MA_significant(matrix_A, matrix_B, resolution, log2_fc_cutoff, upper_limit=7e6, lower_limit=5e4, xscale='log',sig_rows=None, sig_cols=None):
+    distances, log2_fc, distances_out, log2_fc_out, obs_rows, obs_cols, IF_values, IF_values_out = compute_log2fc(matrix_A, matrix_B, resolution, upper_limit, lower_limit)
+
+    all_distances = np.concatenate([distances, distances_out]) if distances_out.size else distances
+    all_log2fc    = np.concatenate([log2_fc,   log2_fc_out])   if log2_fc_out.size   else log2_fc
+    all_rows      = np.concatenate([obs_rows[:len(distances)],  obs_rows[len(distances):]]) if distances_out.size else obs_rows
+    all_cols      = np.concatenate([obs_cols[:len(distances)],  obs_cols[len(distances):]]) if distances_out.size else obs_cols
+
+    fig = plt.figure(figsize=(8, 6), dpi=200)
+    if distances_out.size:
+        plt.scatter(distances_out, log2_fc_out, alpha=0.3, s=1, color='lightgray', label='Outside range')
+    plt.scatter(distances, log2_fc, alpha=0.5, s=1, color='black', label='Within range')
+
+    if sig_rows is not None and sig_cols is not None:
+        # Build a set of significant (row, col) pairs for fast lookup
+        sig_set = set(zip(sig_rows, sig_cols))
+        sig_mask = np.array([( r, c) in sig_set for r, c in zip(all_rows, all_cols)])
+        plt.scatter(all_distances[sig_mask], all_log2fc[sig_mask],
+                    alpha=0.8, s=3, color='red', label='Significant', zorder=5)
+
+    plt.hlines(0,  xmin=all_distances.min(), xmax=all_distances.max(), colors='red',  linestyles='dashed')
+    plt.hlines( log2_fc_cutoff, xmin=all_distances.min(), xmax=all_distances.max(), colors='gray', linestyles='dashed')
+    plt.hlines(-log2_fc_cutoff, xmin=all_distances.min(), xmax=all_distances.max(), colors='gray', linestyles='dashed')
+    plt.vlines(upper_limit, ymin=all_log2fc.min(), ymax=all_log2fc.max(), colors='red', linestyles='dotted', linewidth=0.5)
+    if lower_limit > 0:
+        plt.vlines(lower_limit, ymin=all_log2fc.min(), ymax=all_log2fc.max(), colors='red', linestyles='dotted', linewidth=0.5)
+    plt.xlabel('Genomic Distance (bp)')
+    if xscale == 'log':
+        plt.xscale('log')
+    plt.ylabel('Log2 Fold Change (Sample A / Sample B)')
+    plt.legend(markerscale=5)
+    return fig
 
 
-# Neigborhood functions
 
-def get_neighbors_coordinates(center, K=5, verbose=False):
+# ── Neighbor Support ───────────────────────────────────────────────────────
+def get_neighbors(i, j):
+    
+    """Return direct (4-connected) neighbors of a matrix element.
+	d is diagonal of the spike in
+	row, column,value"""
+    neighbors = []
+    n_rows, n_cols = 1000000000, 1000000000
+
+    if i + 1 < n_rows: #ensures we don't go out of bounds on the rows (lower bound)
+        neighbors.append((i + 1, j))
+    if i - 1 >= 0: #ensures we don't go out of bounds on the rows (upper bound)
+        neighbors.append((i - 1, j))
+    if j + 1 < n_cols: #ensures we don't go out of bounds on the columns (right bound)
+        neighbors.append((i, j + 1))
+    if j - 1 >= 0: #ensures we don't go out of bounds on the columns (left bound)
+        neighbors.append((i, j - 1))
+
+    return neighbors
+
+def neighbor_support_f(final_results):
+
+	sig_interactions = set(
+		zip(final_results['row'], final_results['col'])
+	)
+
+	k = 1
+
+	neighbor_support = []
+
+	if k > 0:
+		for a, b, log2fc in zip(final_results['row'], final_results['col'], final_results['log2fc']):
+			final_results_sign = 1 if log2fc > 0 else 0 # positive or negative log2fc
+			neighbors = get_neighbors_coordinates([(a, b)], K=k) #The logic is that even the outer neighbors will have direct neighbors that can support the interaction, if not then is most likely noise
+			has_support = False
+			for degree in range(k): #degree 0 is first degree neighbors
+				for neighbor in neighbors[degree]:
+					if (neighbor[0], neighbor[1]) in sig_interactions:
+						neighbor_log2fc = final_results.loc[(final_results['row'] == neighbor[0]) & (final_results['col'] == neighbor[1]), 'log2fc'].values[0]
+						neighbor_sign = 1 if neighbor_log2fc > 0 else 0
+						if neighbor_sign == final_results_sign:
+							has_support = True
+							break
+				if has_support:
+					break
+
+			neighbor_support.append(has_support)
+
+	else:
+		neighbor_support = [False] * len(final_results)
+		
+	final_results['neighbor_support'] = neighbor_support
+	return final_results
+
+def get_neighbors_coordinates(center, K=2, verbose=False):
     """
+    center: list of (i, j) coordinates to start from
+    K: number of degrees of neighbors to expand
     General K-degree neighbor expansion.
     Returns:
         A list of lists:
@@ -1139,7 +1342,7 @@ def get_neighbors_coordinates(center, K=5, verbose=False):
     seen = set()
     neighbors_per_degree = [[] for _ in range(K)]
 
-    # --- First degree neighbors ---
+
     frontier = []  # list of (i, j)
 
     for (i0, j0) in center:
@@ -1155,7 +1358,6 @@ def get_neighbors_coordinates(center, K=5, verbose=False):
     if verbose:
         print(f"Degree 1 neighbors: {len(neighbors_per_degree[0])}")
 
-    # --- Higher degree neighbors ---
     for degree in range(1, K):
         next_frontier = []
         for (i, j) in frontier:
@@ -1177,167 +1379,163 @@ def get_neighbors_coordinates(center, K=5, verbose=False):
 
     return (*neighbors_per_degree,)
 
-def get_neighbors_M(M,i, j):
-    
-    """Return direct (4-connected) neighbors of a matrix element.
-	d is diagonal of the spike in
-	row, column,value"""
-    neighbors = []
-    n_rows, n_cols = M.shape
 
-    if i + 1 < n_rows: #ensures we don't go out of bounds on the rows (lower bound)
-        neighbors.append((i + 1, j))
-    if i - 1 >= 0: #ensures we don't go out of bounds on the rows (upper bound)
-        neighbors.append((i - 1, j))
-    if j + 1 < n_cols: #ensures we don't go out of bounds on the columns (right bound)
-        neighbors.append((i, j + 1))
-    if j - 1 >= 0: #ensures we don't go out of bounds on the columns (left bound)
-        neighbors.append((i, j - 1))
+# ───── Bayesian approach ──────────────────────────────────────────────────────
+def bayesian_stimation(counts_A, counts_B):
 
-    return neighbors
+		theta_grid = np.linspace(-8, 8, counts_A.shape[0]) # grid of possible true log2 fold changes
+		#For each theta in the grid compute a prior probability based on a standard normal distribution
+		prior = np.exp(-theta_grid**2 / 2) # standard normal prior
+		prior /= np.trapz(prior, theta_grid) # Normalize the prior over the grid
 
-def get_neighbors(i, j):
-    
-    """Return direct (4-connected) neighbors of a matrix element.
-	d is diagonal of the spike in
-	row, column,value"""
-    neighbors = []
-    n_rows, n_cols = 1000000000, 1000000000
+		#transform all thetas into probabilities
+		p_theta = 2**theta_grid / (1 + 2**theta_grid)
+		#[:,None] adds a new axis to make it a rows vector, 
+		# so that we can broadcast it with p_theta which is a column vector
+		logL = (counts_A[:,None] * np.log(p_theta[None, :]) + counts_B[:,None] * np.log(1 - p_theta[None, :]))
+		#We normalize the log likelihoods by subtracting the maximum log likelihood for each entry, to prevent numerical underflow when we exponentiate later. This does not change the relative probabilities, just rescales them.
+		logL -= logL.max(axis=1, keepdims=True)      
+		L = np.exp(logL)
+		L /= np.trapz(L, theta_grid, axis=1)[:, None] # Normalize the likelihoods over the grid for each entry
 
-    if i + 1 < n_rows: #ensures we don't go out of bounds on the rows (lower bound)
-        neighbors.append((i + 1, j))
-    if i - 1 >= 0: #ensures we don't go out of bounds on the rows (upper bound)
-        neighbors.append((i - 1, j))
-    if j + 1 < n_cols: #ensures we don't go out of bounds on the columns (right bound)
-        neighbors.append((i, j + 1))
-    if j - 1 >= 0: #ensures we don't go out of bounds on the columns (left bound)
-        neighbors.append((i, j - 1))
+		posterior = L * prior[None, :]
+		posterior /= np.trapz(posterior, theta_grid, axis=1)[:, None] # Normalize the posterior over the grid for each entry
+		post_mean = np.trapz(theta_grid[None, :] * posterior, theta_grid, axis=1)
+		return post_mean
 
-    return neighbors
 
-def neighbor_support(final_results):
-	sig_interactions = set(
-		zip(final_results['bin1'], final_results['bin2'])
-	)
-
-	k = 1
-
-	neighbor_support = []
-
-	if k > 0:
-		for a, b in zip(final_results['bin1'], final_results['bin2']):
-			neighbors = get_neighbors_coordinates([(a, b)], K=1) #The logic is that even the outer neighbors will have direct neighbors that can support the interaction, if not then is most likely noise
-			has_support = False
-			for degree in range(k): #degree 0 is first degree neighbors
-				for neighbor in neighbors[degree]:
-					if (neighbor[0], neighbor[1]) in sig_interactions:
-						has_support = True
-						break
-				if has_support:
-					break
-
-			neighbor_support.append(has_support)
-
+def compute_IF_cutoff(if_in: np.ndarray, if_out: np.ndarray, option: str = "out"):
+	"""Compute the cutoff for interaction frequencies (IF) based on the specified option."""
+	if option == "all":
+		all_if = np.concatenate([if_in, if_out]) if if_out.size else if_in
+		cutoff = np.percentile(all_if, 15) if all_if.size else None
+	elif option == "out":
+		cutoff = np.percentile(if_out, 15) if if_out.size else None
 	else:
-		neighbor_support = [False] * len(final_results)
+		raise ValueError("Invalid option. Please choose 'all' or 'out'.")
+
+	return cutoff
+
+def _generate_IF_from_matrices(matrix_A, matrix_B, resolution,upper_limit=7e6, lower_limit=5e4):
+	n = matrix_A.shape[0]
+	min_d= int(max(1, lower_limit // resolution))
+	max_d= int(min(n, upper_limit // resolution))
+
+	IF_list, IF_out_list = [], []
+
+	for d in range(1,n):
+		diag_A=np.asarray(matrix_A.diagonal(d),dtype=np.float64).ravel()
+		diag_B=np.asarray(matrix_B.diagonal(d),dtype=np.float64).ravel()
 		
-	final_results['neighbor_support'] = neighbor_support
-	return final_results
-
-### Synthetic datasets 
-
-def synthetic_datasets(matrix, ds_factor):
-	"""downsampling method
-	ds_factor = downsampling factor, e.g. 0.5 means half the reads"""
-	if ds_factor == 1:
-		return matrix.copy()
-	else:
-		n_reads = get_reads_count(matrix) * ds_factor
-		tag_mat= dense2tag(matrix) #tag_len is the number of non-zero elements in the matrix
-		sample_idx = np.random.choice(len(tag_mat), int(n_reads)) #from tag len randomly select n_reads number of items
-		sample_tag = tag_mat[sample_idx]# getting coordinates from the coo matrix of the selected items
-		down_mat = tag2dense(sample_tag, matrix.shape[0])
-		return down_mat
-
-
-
-#Others
-
-def get_chromosome_length(hic_path,chromosome):
-	hic = hicstraw.HiCFile(hic_path)
-	chromosomes = hic.getChromosomes()
-	for chrom in chromosomes:
-		if chrom.name == chromosome:
-			chromosome_length = chrom.length
-			return int(chromosome_length)
-		else:
+		valid = (diag_A > 0) & (diag_B > 0)
+		valid = valid.ravel()
+		if not np.any(valid):
 			continue
-	raise ValueError(f"Chromosome {chromosome} not found in the Hi-C file.")
+		# Compute mean interaction frequency for valid entries
+		mean_IF = (diag_A[valid] + diag_B[valid]) / 2
 
-def pre_counts(synthetic_counts1,synthetic_counts2,d_1,d_2,y_1,y_2,desired_alpha,resolution):
+		if min_d <= d < max_d:
+			IF_list.append(mean_IF)
+		else:
+			IF_out_list.append(mean_IF)
+
+	IF_values = np.concatenate(IF_list) if IF_list else np.array([])
+	out_IF_values = np.concatenate(IF_out_list) if IF_out_list else np.array([])
+
+	return IF_values, out_IF_values
+
+def compute_log2fc_bayesian(matrix_A,matrix_B,resolution,lower_limit=5e4, upper_limit=7e6):
+	#The normalized matrices still include all bins, we just removed them to avoid normalizing on dispersed values 
+	n = matrix_A.shape[0]
+	min_d= int(max(1, lower_limit // resolution))
+	max_d= int(min(n, upper_limit // resolution))
+
     
-	counts_1_v2 = synthetic_counts1.copy()
-	counts_2_v2 = synthetic_counts2.copy()
+	distances_list, log2fc_list, rows_in_list, cols_in_list, Avalues_in,Bvalues_in= [], [], [], [], [], []
+	distances_out_list, log2fc_out_list, rows_out_list, cols_out_list, Avalues_out,Bvalues_out= [], [], [], [], [], []
 
-	b_refit_1 = refit_intercept(y_1, d_1, desired_alpha)
-	b_refit_2 = refit_intercept(y_2, d_2, desired_alpha)
+	for d in range(1,n):
+		diag_A=np.asarray(matrix_A.diagonal(d),dtype=np.float64).ravel()
+		diag_B=np.asarray(matrix_B.diagonal(d),dtype=np.float64).ravel()
 
-	b_mean = (b_refit_1 + b_refit_2) / 2
+		#First just filter 0 bins
+		valid = (diag_A > 0) & (diag_B > 0)
+		valid = valid.ravel()
+		rows_valid = np.where(valid)[0] #because it is being treated as a 1D array after raveling
+		cols_valid = rows_valid + d
+		if not np.any(valid):
+			continue
+		# Compute log2 fold change for valid entries
+		#For each valid entry we have the observed counts in A and B, each element correspond to the respective bin
+		#shape (N,) where N is the number of valid entries in the diagonal
+		diag_A_valid = (diag_A[valid]).astype(np.float64) 
+		diag_B_valid = (diag_B[valid]).astype(np.float64) 
+		
+		#Now this is the log2fc
+		post_mean = bayesian_stimation(diag_A_valid, diag_B_valid)
+		log2fc = post_mean
+		d_bp = d * resolution
 
-	desired_fit_1 = linear_distance_decay(b_mean,desired_alpha,d_1)
-	desired_fit_2 = linear_distance_decay(b_mean,desired_alpha,d_2)
+		if min_d <= d < max_d:
+			log2fc_list.append(log2fc)
+			distances_list.append(np.full(log2fc.size, d_bp, dtype=np.float64))
+			rows_in_list.append(rows_valid) #keep track of the row indices of the valid entries in the diagonal
+			cols_in_list.append(cols_valid) #keep track of the column indices of the valid entries in the diagonal
+			Avalues_in.append(diag_A_valid)
+			Bvalues_in.append(diag_B_valid)
+		else:
+			log2fc_out_list.append(log2fc)
+			distances_out_list.append(np.full(log2fc.size, d_bp, dtype=np.float64))
+			rows_out_list.append(rows_valid) #keep track of the row indices of the valid entries in the diagonal
+			cols_out_list.append(cols_valid) #keep track of the column indices of the valid entries in the diagonal
+			Avalues_out.append(diag_A_valid)
+			Bvalues_out.append(diag_B_valid)
+			#out_IF_list.append(np.full(log2fc.size, mean_IF, dtype=np.float64))
+		
+	obs_rows = np.concatenate(rows_in_list + rows_out_list) if (rows_in_list or rows_out_list) else np.array([], dtype=int)
+	obs_cols = np.concatenate(cols_in_list + cols_out_list) if (cols_in_list or cols_out_list) else np.array([], dtype=int)
 
-	factors_r = get_individual_factors(y_1,desired_fit_1)
-	factors_s = get_individual_factors(y_2,desired_fit_2)
-
-	#Apply factors to the dictionary counts
-	scaled_counts_1,full_factors_r=apply_factors_to_dict_counts(counts_1_v2,factors_r,resolution)
-	scaled_counts_2,full_factors_s=apply_factors_to_dict_counts(counts_2_v2,factors_s,resolution)
+	distances = np.concatenate(distances_list) if distances_list else np.array([])
+	log2fc_values = np.concatenate(log2fc_list) if log2fc_list else np.array([])
+	distances_out     = np.concatenate(distances_out_list)     if distances_out_list     else np.array([])
+	log2fc_values_out = np.concatenate(log2fc_out_list)        if log2fc_out_list        else np.array([])
 	
-	return scaled_counts_1,scaled_counts_2,full_factors_r,full_factors_s
+	Avalues = np.concatenate(Avalues_in) if Avalues_in else np.array([])
+	Bvalues = np.concatenate(Bvalues_in) if Bvalues_in else np.array([])
+	Avalues_out = np.concatenate(Avalues_out) if Avalues_out else np.array([])
+	Bvalues_out = np.concatenate(Bvalues_out) if Bvalues_out else np.array([])
 
-## Higher resolutions
+	return distances, log2fc_values, distances_out, log2fc_values_out, obs_rows, obs_cols, Avalues, Bvalues, Avalues_out, Bvalues_out
 
-def generate_cool_matrix(matrix,chromosome,resolution,output_path):
-	n = matrix.shape[0]
 
-	#bin table is always sqared
-	bins = pd.DataFrame({
-		'chrom': [chromosome]*n,
-		'start': np.arange(0, n*resolution, resolution),
-		'end': np.arange(resolution, (n+1)*resolution, resolution),
-		"KR": np.ones(n, dtype=np.float32) # Dummy normalization vector
+# ------- Plot decays
+def _plot_distance_decay(matrix_A: np.ndarray, matrix_B: np.ndarray, resolution: int, type_plot: str = "log", filter: bool = True):
+	# It should then just plot the decay based on the filtered values because we already filtered inside get_distances_and_counts_paired
+	distances_A, counts_A, counts_B = get_distances_and_counts_paired(matrix_A, matrix_B, resolution, filter=filter)
+	distances_B = distances_A  # Since we're dealing with paired matrices, the distances should be the same
 
-	})
-
-	i,j = np.triu_indices(n)
-
-	# Pixels table is a 2-D array of every pixel in the upper triangle of the matrix
-	pixels = pd.DataFrame({
-		'bin1_id': i,
-		'bin2_id': j,
-		'count': matrix[i,j].astype(int)
-	})
-	pixels = pixels[pixels["count"] > 0]
-
-	cooler.create_cooler(
-		output_path,
-		bins,
-		pixels,
-		dtypes={"count": "int32"},
-		ordered=True, symmetric_upper=True
-	)
-
-	#mcool 
-
-	mcool_name = output_path.replace('.cool', '.mcool')
+	A_values=calculate_distance_decay_individual(distances_A, counts_A, metric='median')
+	B_values=calculate_distance_decay_individual(distances_B, counts_B, metric='median')
+	#Arrays here have elements per distance, not per bin
 	
-	if os.path.exists(mcool_name):
-		os.remove(mcool_name)
+	if type_plot == "linear":
+		plt.figure(figsize=(6, 4), dpi=200)
+		plt.plot(A_values[0], A_values[2], label='Matrix A', color='blue')
+		plt.plot(B_values[0], B_values[2], label='Matrix B', color='orange')
+		plt.xlabel('Distance (bp)')
+		plt.ylabel('Distance Decay (median)')
+		plt.title('Distance Decay Comparison')
+		plt.legend()
+		plt.show()
+	elif type_plot == "log":
+		plt.figure(figsize=(6, 4), dpi=200)
+		plt.plot(A_values[5], A_values[6], label='Matrix A', color='blue')
+		plt.plot(B_values[5], B_values[6], label='Matrix B', color='orange')
+		plt.xlabel('Distance (bp)')
+		plt.ylabel('Distance Decay (median)')
+		plt.title('Distance Decay Comparison')
+		plt.legend()
+		plt.show()
+	else:
+		raise ValueError("Invalid type_plot. Choose 'linear' or 'log'.")
 	
-	cooler.zoomify_cooler(output_path,chunksize=256,
-		outfile=mcool_name,
-		resolutions=[resolution] 
-	)
-
-	return mcool_name

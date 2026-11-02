@@ -9,6 +9,6 @@ Requires-Dist: pandas
 Requires-Dist: scipy
 Requires-Dist: cooler
 Requires-Dist: statsmodels
-Provides-Extra: plot
-Requires-Dist: matplotlib; extra == "plot"
+Requires-Dist: matplotlib
+Requires-Dist: hic-straw
 Dynamic: license-file

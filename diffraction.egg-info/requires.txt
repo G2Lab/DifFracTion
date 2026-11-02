@@ -3,6 +3,5 @@ pandas
 scipy
 cooler
 statsmodels
-
-[plot]
 matplotlib
+hic-straw
