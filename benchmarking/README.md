@@ -1,3 +1,7 @@
+# Main manuscript results
+
+Results for main figures 2-4 are generated running the following scripts
+
 # Generate environment
 
 ```bash

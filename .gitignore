@@ -20,5 +20,6 @@ results_spikeins/*
 results_downsample_n_spikes/*
 benchmarking/PBS/*
 analyses/*
+!analyses/src
 validation/
 graveyard/*
